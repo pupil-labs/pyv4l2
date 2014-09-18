@@ -7,7 +7,6 @@ from libc.string cimport strerror
 cimport cmman as mman
 cimport cv4l2 as v4l2
 cimport cv4lconvert as v4lconvert
-from collections import named_tuple
 cimport numpy as np
 import numpy as np
 
@@ -125,7 +124,7 @@ cdef class Capture:
             raise Exception("%s does not support streaming i/o"%self.dev_name)
 
 
-    cdef stop(self):
+    def stop(self):
         cdef v4l2.v4l2_buf_type buf_type
         if self._camera_streaming:
             buf_type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
@@ -133,27 +132,27 @@ cdef class Capture:
                 self.close()
                 raise Exception("Could not deinit buffers.")
             else:
-                self._camera_streaming =False
+                self._camera_streaming = False
 
 
-    cdef start(self):
+    def start(self):
         cdef v4l2.v4l2_buffer buf
 
         for i in range(len(self.buffers)):
             buf.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
-            buf.memory = v4l2.V4L2_MEMORY_MMAP;
+            buf.memory = v4l2.V4L2_MEMORY_MMAP
             buf.index = i
             if self.xioctl(v4l2.VIDIOC_QBUF, &buf) == -1:
                 raise Exception('VIDIOC_QBUF')
     
         cdef v4l2.v4l2_buf_type buf_type
-        buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE
+        buf_type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
         if self.xioctl(v4l2.VIDIOC_STREAMON, &buf_type) ==-1:
             raise Exception("VIDIOC_STREAMON")
         
 
 
-    cdef init_buffers(self):
+    def init_buffers(self):
         cdef v4l2.v4l2_requestbuffers req
         cdef v4l2.v4l2_buffer buf
 
@@ -191,11 +190,13 @@ cdef class Capture:
             self.buffers.append(b)
 
 
-    cdef deinit_buffers(self):
-        for b in self.buffers:
-            if (b.start, b.length) ==-1:
-                raise Exception("munmap error")
-        self.buffers = []
+    def deinit_buffers(self):
+        if self._buffers_initialized:
+            for b in self.buffers:
+                if (b.start, b.length) ==-1:
+                    raise Exception("munmap error")
+            self.buffers = []
+            self._buffers_initialized = False
 
 
     cdef set_format(self):

@@ -3,7 +3,7 @@ import logging
 import cv2
 from time import time
 logging.basicConfig(level=logging.DEBUG)
-
+from time import time,sleep
 
 
 
@@ -19,4 +19,9 @@ cap.transport_format = 'MJPG'
 cap.frame_size = (1920, 1080)
 cap.frame_rate=(1,30)
 print cap.frame_size
+cap.init_buffers()
+cap.start()
+sleep(10)
+cap.stop()
+cap.deinit_buffers()
 cap = None
