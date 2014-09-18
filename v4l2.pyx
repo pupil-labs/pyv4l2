@@ -2,9 +2,10 @@ import cython
 
 from posix cimport fcntl,unistd, stat, time
 from posix.ioctl cimport ioctl
-from libc.errno cimport errno,EINTR,EINVAL
+from libc.errno cimport errno,EINTR,EINVAL,EAGAIN,EIO
 from libc.string cimport strerror
 cimport cmman as mman
+cimport cselect as select
 cimport cv4l2 as v4l2
 cimport cv4lconvert as v4lconvert
 cimport numpy as np
@@ -21,7 +22,7 @@ def fourcc_string(i):
         s += chr(i>>shift & 255)
     return s
 
-def fourcc_u32(char * fourcc):
+cpdef v4l2.__u32 fourcc_u32(char * fourcc):
     return v4l2.v4l2_fourcc(fourcc[0],fourcc[1],fourcc[2],fourcc[3])
 
 
@@ -38,6 +39,9 @@ cdef class Capture:
     cdef object _transport_formats, _frame_rates,_frame_sizes
     cdef object _transport_format, _frame_rate, _frame_size
 
+    cdef bint _buffer_active
+    cdef int _allocated_buf_n
+    cdef v4l2.v4l2_buffer _active_buffer
 
     cdef list buffers
     def __cinit__(self,char *dev_name):
@@ -48,11 +52,17 @@ cdef class Capture:
         self.dev_handle = self.open_device()
         self.verify_device()
 
+
+
+        self.transport_format = 'MJPG'
         self.get_format()
 
         self._transport_formats = None
         self._frame_rates = None
         self._frame_sizes = None
+
+        self._buffer_active = False
+        self._allocated_buf_n = 0
 
         self._buffers_initialized = False
         self._camera_streaming = False
@@ -71,7 +81,10 @@ cdef class Capture:
         #
         #
 
+
     def close(self):
+        self.stop()
+        self.deinit_buffers()
         self.close_device()
 
     def __dealloc__(self):
@@ -79,7 +92,66 @@ cdef class Capture:
             self.close_device()
 
     def get_frame(self):
-        pass
+        if not self._camera_streaming:
+            self.init_buffers()
+            self.start()
+
+        if self._buffer_active:
+            if self.xioctl(v4l2.VIDIOC_QBUF,&self._active_buffer) == -1:
+                raise Exception("Could not queue buffer")
+            else:
+                self._buffer_active = False
+
+        self.wait_for_buffer_avaible()
+
+
+        self._active_buffer.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+        self._active_buffer.memory = v4l2.V4L2_MEMORY_MMAP
+
+        if self.xioctl(v4l2.VIDIOC_DQBUF, &self._active_buffer) == -1:
+            if errno == EAGAIN: # no buffer available yet.
+                raise Exception("Fixme")
+
+            elif errno == EIO:
+                # Can ignore EIO, see spec. 
+                # fall through 
+                pass
+            else:
+                raise Exception("VIDIOC_DQBUF")
+
+        self._buffer_active = True
+        assert(self._active_buffer.index < self._allocated_buf_n)
+
+        print self._active_buffer.timestamp.tv_sec,',',self._active_buffer.timestamp.tv_usec
+
+
+
+
+
+    cdef wait_for_buffer_avaible(self):
+        cdef select.fd_set fds
+        cdef time.timeval tv
+        cdef int r
+        while True:
+            select.FD_ZERO(&fds)
+            select.FD_SET(self.dev_handle, &fds)
+            tv.tv_sec = 1
+            tv.tv_usec = 0
+
+            r = select.select(self.dev_handle + 1, &fds, NULL, NULL, &tv)
+
+            if r == 0:
+                raise Exception("select timeout")
+
+            elif r == -1:
+                if errno != EINTR:
+                    raise Exception("Select Error")
+                else:
+                    #try again
+                    pass
+            else:
+                return
+
 
     cdef xioctl(self, int request, void *arg):
         cdef int r
@@ -124,79 +196,93 @@ cdef class Capture:
             raise Exception("%s does not support streaming i/o"%self.dev_name)
 
 
-    def stop(self):
+    cdef stop(self):
         cdef v4l2.v4l2_buf_type buf_type
         if self._camera_streaming:
             buf_type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
             if self.xioctl(v4l2.VIDIOC_STREAMOFF,&buf_type) == -1:
                 self.close()
                 raise Exception("Could not deinit buffers.")
-            else:
-                self._camera_streaming = False
+
+            self._camera_streaming = False
+            logger.debug("Capure stopped.")
 
 
-    def start(self):
+
+    cdef start(self):
         cdef v4l2.v4l2_buffer buf
-
-        for i in range(len(self.buffers)):
-            buf.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
-            buf.memory = v4l2.V4L2_MEMORY_MMAP
-            buf.index = i
-            if self.xioctl(v4l2.VIDIOC_QBUF, &buf) == -1:
-                raise Exception('VIDIOC_QBUF')
-    
         cdef v4l2.v4l2_buf_type buf_type
-        buf_type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
-        if self.xioctl(v4l2.VIDIOC_STREAMON, &buf_type) ==-1:
-            raise Exception("VIDIOC_STREAMON")
+        if not self._camera_streaming:
+            for i in range(len(self.buffers)):
+                buf.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+                buf.memory = v4l2.V4L2_MEMORY_MMAP
+                buf.index = i
+                if self.xioctl(v4l2.VIDIOC_QBUF, &buf) == -1:
+                    raise Exception('VIDIOC_QBUF')
+        
+            buf_type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+            if self.xioctl(v4l2.VIDIOC_STREAMON, &buf_type) ==-1:
+                raise Exception("VIDIOC_STREAMON")
+            self._camera_streaming = True
+            logger.debug("Capure started.")
+
         
 
 
-    def init_buffers(self):
+    cdef init_buffers(self):
         cdef v4l2.v4l2_requestbuffers req
         cdef v4l2.v4l2_buffer buf
+        if not self._buffers_initialized:
+            req.count = 4
+            req.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+            req.memory = v4l2.V4L2_MEMORY_MMAP
 
-        req.count = 4
-        req.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
-        req.memory = v4l2.V4L2_MEMORY_MMAP
+            if self.xioctl(v4l2.VIDIOC_REQBUFS, &req) == -1:
+                if EINVAL == errno:
+                    raise Exception("%s does not support memory mapping"%self.dev_name)
+                else:
+                    raise Exception("VIDIOC_REQBUFS failed")
 
-        if self.xioctl(v4l2.VIDIOC_REQBUFS, &req) == -1:
-            if EINVAL == errno:
-                raise Exception("%s does not support memory mapping"%self.dev_name)
-            else:
-                raise Exception("VIDIOC_REQBUFS failed")
+            if req.count < 2:
+                raise Exception("Insufficient buffer memory on %s\n"%self.dev_name)
 
-        if req.count < 2:
-            raise Exception("Insufficient buffer memory on %s\n"%self.dev_name)
+            self.buffers = []
+            self._allocated_buf_n = req.count
 
-        self.buffers = []
+            for buf_n in range(req.count):
+                buf.type        = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+                buf.memory      = v4l2.V4L2_MEMORY_MMAP
+                buf.index       = buf_n
+                if self.xioctl(v4l2.VIDIOC_QUERYBUF, &buf) == -1:
+                    raise Exception("VIDIOC_QUERYBUF")
 
-        for buf_n in range(req.count):
-            buf.type        = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
-            buf.memory      = v4l2.V4L2_MEMORY_MMAP
-            buf.index       = buf_n
-            if self.xioctl(v4l2.VIDIOC_QUERYBUF, &buf) == -1:
-                raise Exception("VIDIOC_QUERYBUF")
+                b = buffer_handle() 
+                b.length = buf.length
+                b.start = mman.mmap(NULL,#start anywhere
+                                    buf.length,
+                                    mman.PROT_READ | mman.PROT_WRITE,#required
+                                    mman.MAP_SHARED,#recommended
+                                    self.dev_handle, buf.m.offset)
+                if <int>b.start == mman.MAP_FAILED:
+                    raise Exception("MMAP Error")
+                self.buffers.append(b)
 
-            b = buffer_handle() 
-            b.length = buf.length
-            b.start = mman.mmap(NULL,#start anywhere
-                                buf.length,
-                                mman.PROT_READ | mman.PROT_WRITE,#required
-                                mman.MAP_SHARED,#recommended
-                                self.dev_handle, buf.m.offset)
-            if <int>b.start == mman.MAP_FAILED:
-                raise Exception("MMAP Error")
-            self.buffers.append(b)
+            self._buffers_initialized = True
+            logger.debug("Buffers initialized")
 
 
-    def deinit_buffers(self):
+
+    cdef deinit_buffers(self):
+        cdef buffer_handle b
         if self._buffers_initialized:
             for b in self.buffers:
-                if (b.start, b.length) ==-1:
+                if mman.munmap(b.start, b.length) ==-1:
                     raise Exception("munmap error")
             self.buffers = []
             self._buffers_initialized = False
+            self._allocated_buf_n = 0
+
+            logger.debug("Buffers deinitialized")
 
 
     cdef set_format(self):
@@ -204,7 +290,12 @@ cdef class Capture:
         format.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
         format.fmt.pix.width       = self.frame_size[0]
         format.fmt.pix.height      = self.frame_size[1]
-        format.fmt.pix.pixelformat = fourcc_u32(self.transport_format)
+        format.fmt.pix.pixelformat = fourcc_u32(self._transport_format)
+        # print fourcc_u32(self._transport_format)
+        # print fourcc_u32('YUYV')
+        # format.fmt.pix.pixelformat = fourcc_u32('MJPG')
+        # format.fmt.pix.pixelformat = v4l2.V4L2_PIX_FMT_MJPEG
+
         format.fmt.pix.field       = v4l2.V4L2_FIELD_ANY
         if self.xioctl(v4l2.VIDIOC_S_FMT, &format) == -1:
             self.close()
@@ -215,7 +306,7 @@ cdef class Capture:
         streamparm.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
         streamparm.parm.capture.timeperframe.numerator = self.frame_rate[0]
         streamparm.parm.capture.timeperframe.denominator = self.frame_rate[1]
-        if self.xioctl(v4l2.VIDIOC_G_PARM, &streamparm) == -1:
+        if self.xioctl(v4l2.VIDIOC_S_PARM, &streamparm) == -1:
             self._close()
             raise Exception("Could not set v4l2 parameters")
        
