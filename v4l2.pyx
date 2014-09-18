@@ -32,6 +32,10 @@ cdef class buffer_handle:
                 
 
 
+
+cdef class Frame:
+    pass
+
 cdef class Capture:
     cdef int dev_handle 
     cdef char *dev_name
@@ -51,10 +55,6 @@ cdef class Capture:
         self.dev_name = dev_name
         self.dev_handle = self.open_device()
         self.verify_device()
-
-
-
-        self.transport_format = 'MJPG'
         self.get_format()
 
         self._transport_formats = None
@@ -89,7 +89,7 @@ cdef class Capture:
 
     def __dealloc__(self):
         if self.dev_handle != -1:
-            self.close_device()
+            self.close()
 
     def get_frame(self):
         if not self._camera_streaming:
@@ -114,16 +114,14 @@ cdef class Capture:
 
             elif errno == EIO:
                 # Can ignore EIO, see spec. 
-                # fall through 
-                pass
+                pass # fall through 
             else:
                 raise Exception("VIDIOC_DQBUF")
 
         self._buffer_active = True
         assert(self._active_buffer.index < self._allocated_buf_n)
 
-        print self._active_buffer.timestamp.tv_sec,',',self._active_buffer.timestamp.tv_usec
-
+        print self._active_buffer.timestamp.tv_sec,',',self._active_buffer.timestamp.tv_usec,self._active_buffer.bytesused,self._active_buffer.index
 
 
 
@@ -290,11 +288,8 @@ cdef class Capture:
         format.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
         format.fmt.pix.width       = self.frame_size[0]
         format.fmt.pix.height      = self.frame_size[1]
-        format.fmt.pix.pixelformat = fourcc_u32(self._transport_format)
-        # print fourcc_u32(self._transport_format)
-        # print fourcc_u32('YUYV')
-        # format.fmt.pix.pixelformat = fourcc_u32('MJPG')
-        # format.fmt.pix.pixelformat = v4l2.V4L2_PIX_FMT_MJPEG
+        format.fmt.pix.pixelformat = fourcc_u32(self.transport_format)
+
 
         format.fmt.pix.field       = v4l2.V4L2_FIELD_ANY
         if self.xioctl(v4l2.VIDIOC_S_FMT, &format) == -1:
@@ -414,7 +409,7 @@ cdef class Capture:
             self._frame_rates = None
             self.stop()
             self.deinit_buffers()
-            self.set_format
+            self.set_format()
             self.get_format()
 
 
