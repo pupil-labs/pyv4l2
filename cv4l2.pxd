@@ -13,6 +13,10 @@ cdef extern from  "linux/videodev2.h":
     ctypedef unsigned long long int  __u64
     ctypedef signed long long int    __s64
 
+
+    __u32 v4l2_fourcc(char a,char b,char c,char d)
+
+
     enum: V4L2_CAP_VIDEO_CAPTURE
     enum: V4L2_CAP_VIDEO_OUTPUT
     enum: V4L2_CAP_VIDEO_OVERLAY

@@ -12,5 +12,12 @@ cap = None
 ```
 
 
-## building
+## just build locally
+```
 python setup.py build_ext -i
+```
+
+## or install
+```
+python setup.py install
+```
