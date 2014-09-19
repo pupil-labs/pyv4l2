@@ -12,9 +12,17 @@ cap = None
 ```
 
 
-##dependecy libjpeg-turbo (and it needd to be build with fpic!)
-```
+##dependecy libjpeg-turbo 
+Needs to be build with fpic!
+Will be installed to `/opt/libjpeg-turbo`.
 
+```
+wget latest source
+unzip source_dir
+cd source_dir
+./configure --with-pic
+sudo make install
+```
 
 ## just build locally
 ```
