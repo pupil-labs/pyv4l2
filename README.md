@@ -12,6 +12,10 @@ cap = None
 ```
 
 
+##dependecy libjpeg-turbo (and it needd to be build with fpic!)
+```
+
+
 ## just build locally
 ```
 python setup.py build_ext -i

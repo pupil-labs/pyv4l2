@@ -12,6 +12,7 @@ extensions = [
                 include_dirs =  [numpy.get_include()],
                 libraries = ['v4l2','v4lconvert'],
                 extra_link_args=[],
+                extra_objects = ['/opt/libjpeg-turbo/lib64/libturbojpeg.a'], #can we use the static lib here? is that legal?
                 extra_compile_args=[]
             ),
 ]

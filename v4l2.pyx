@@ -7,7 +7,8 @@ from libc.string cimport strerror
 cimport cmman as mman
 cimport cselect as select
 cimport cv4l2 as v4l2
-cimport cv4lconvert as v4lconvert
+cimport cturbojpeg as turbojpeg
+# cimport cv4lconvert as v4lconvert
 cimport numpy as np
 import numpy as np
 
@@ -29,12 +30,86 @@ cpdef v4l2.__u32 fourcc_u32(char * fourcc):
 cdef class buffer_handle:
     cdef void *start
     cdef size_t length
-                
-
-
-
+         
+    
 cdef class Frame:
-    pass
+    '''
+    The Frame Object holds image data and image metadata.
+
+    The Frame object is returned from Capture.get_frame()
+
+    It will hold the data in the transport format the Capture is configured to grab.
+    Usually this is mjpeg or yuyv
+
+    Other formats can be requested and will be converted/decoded on the fly.
+    Frame will use caching to avoid redunant work.
+    Usually RGB8,YUYV or GRAY are requested formats.
+
+    WARNING:
+    When capture.get_frame() is called again previos instances of Frame will point to invalid memory.
+    Specifically the image format in the capture transport format.
+    Previously converted formats are still valid.
+    '''
+
+    cdef turbojpeg.tjhandle tj_context
+
+    cdef buffer_handle _mjpeg_buffer,_yuyv_buffer,_gray_buffer,_bgr_buffer
+    cdef public double timestamp
+
+    def __cinit__(self):
+        self.tj_context
+        self._mjpeg_buffer.start = NULL
+        self._yuyv_buffer.start = NULL
+        self._gray_buffer.start = NULL
+        self._bgr_buffer.start = NULL
+
+    def __init__(self):
+        pass
+
+
+    property jpeg:
+        def __set__(self,val):
+            raise Exception('read only')
+        def __get__(self):
+            return None
+
+    property yuyv:
+        def __set__(self,val):
+            raise Exception('read only')
+        def __get__(self):
+            return None
+
+    property gray:      
+        def __set__(self,val):
+            raise Exception('read only')
+        def __get__(self):
+            return None
+
+    property bgr:      
+        def __set__(self,val):
+            raise Exception('read only')
+        def __get__(self):
+            return None
+
+    #include <turbojpeg.h>
+
+    # long unsigned int _jpegSize; //!< _jpegSize from above
+    # unsigned char* _compressedImage; //!< _compressedImage from above
+
+    # int jpegSubsamp, width, height;
+    # unsigned char buffer[width*height*COLOR_COMPONENTS]; //!< will contain the decompressed image
+
+    # tjhandle _jpegDecompressor = tjInitDecompress();
+
+    # tjDecompressHeader2(_jpegDecompressor, _compressedImage, _jpegSize, &width, &height, &jpegSubsamp);
+
+    # tjDecompress2(_jpegDecompressor, _compressedImage, _jpegSize, buffer, width, 0/*pitch*/, height, TJPF_RGB, TJFLAG_FASTDCT);
+
+    # tjDestroy(_jpegDecompressor);
+
+
+
+
 
 cdef class Capture:
     cdef int dev_handle 
@@ -46,8 +121,10 @@ cdef class Capture:
     cdef bint _buffer_active
     cdef int _allocated_buf_n
     cdef v4l2.v4l2_buffer _active_buffer
-
     cdef list buffers
+
+    cdef turbojpeg.tjhandle tj_context
+
     def __cinit__(self,char *dev_name):
         pass
 
@@ -79,7 +156,8 @@ cdef class Capture:
         #self._use_hw_timestamps = use_hw_timestamps
         #
         #
-        #
+        #setup for jpeg converter
+        self.tj_context = turbojpeg.tjInitDecompress()
 
 
     def close(self):
@@ -92,6 +170,7 @@ cdef class Capture:
             self.close()
 
     def get_frame(self):
+        cdef Frame out_frame
         if not self._camera_streaming:
             self.init_buffers()
             self.start()
@@ -122,7 +201,9 @@ cdef class Capture:
         assert(self._active_buffer.index < self._allocated_buf_n)
 
         print self._active_buffer.timestamp.tv_sec,',',self._active_buffer.timestamp.tv_usec,self._active_buffer.bytesused,self._active_buffer.index
-
+        out_frame = Frame()
+        out_frame.tj_context = self.tj_context
+        out_frame.timestamp = <double>self._active_buffer.timestamp.tv_sec + <double>self._active_buffer.timestamp.tv_usec / 10e6
 
 
 
