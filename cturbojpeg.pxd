@@ -27,6 +27,7 @@ cdef extern from '/opt/libjpeg-turbo/include/turbojpeg.h':
     int tjBlueOffset[11]
     int tjPixelSize[11]
 
+
     cdef enum TJXOP:
         TJXOP_NONE
         TJXOP_HFLIP

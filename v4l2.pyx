@@ -53,15 +53,21 @@ cdef class Frame:
 
     cdef turbojpeg.tjhandle tj_context
 
-    cdef buffer_handle _mjpeg_buffer,_yuyv_buffer,_gray_buffer,_bgr_buffer
+    cdef buffer_handle _jpeg_buffer,_yuyv_buffer,_gray_buffer,_bgr_buffer
+    cdef object _bgr_array, _gray_array
     cdef public double timestamp
+    cdef public int width,height
 
     def __cinit__(self):
-        self.tj_context
-        self._mjpeg_buffer.start = NULL
+        # self.tj_context
+        # self.width
+        # self.height
+        self._jpeg_buffer.start = NULL
         self._yuyv_buffer.start = NULL
         self._gray_buffer.start = NULL
         self._bgr_buffer.start = NULL
+        self._bgr_array = None
+        self._gray_array = None
 
     def __init__(self):
         pass
@@ -83,31 +89,50 @@ cdef class Frame:
         def __set__(self,val):
             raise Exception('read only')
         def __get__(self):
-            return None
+            if self._gray_array is None:
+                self.jpeg2gray()
+            return self._gray_array
 
     property bgr:      
         def __set__(self,val):
             raise Exception('read only')
         def __get__(self):
-            return None
-
-    #include <turbojpeg.h>
-
-    # long unsigned int _jpegSize; //!< _jpegSize from above
-    # unsigned char* _compressedImage; //!< _compressedImage from above
-
-    # int jpegSubsamp, width, height;
-    # unsigned char buffer[width*height*COLOR_COMPONENTS]; //!< will contain the decompressed image
-
-    # tjhandle _jpegDecompressor = tjInitDecompress();
-
-    # tjDecompressHeader2(_jpegDecompressor, _compressedImage, _jpegSize, &width, &height, &jpegSubsamp);
-
-    # tjDecompress2(_jpegDecompressor, _compressedImage, _jpegSize, buffer, width, 0/*pitch*/, height, TJPF_RGB, TJFLAG_FASTDCT);
-
-    # tjDestroy(_jpegDecompressor);
+            if self._bgr_array is None:
+                self.jpeg2bgr()
+            return self._bgr_array
 
 
+
+    cdef jpeg2bgr(self):
+        cdef int channels = 3
+        cdef int jpegSubsamp, j_width,j_height
+        cdef int result
+        # cdef unsigned char bgr_buffer[self.width*self.height*channels]
+        cdef np.ndarray[np.uint8_t, ndim=1] bgr_array = np.empty(self.width*self.height*channels, dtype=np.uint8)
+        turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, &j_width, &j_height, &jpegSubsamp)
+        result = turbojpeg.tjDecompress2(self.tj_context, <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, 
+                                <unsigned char *> bgr_array.data, 
+                                j_width, 0, j_height, turbojpeg.TJPF_BGR, 0)#turbojpeg.TJFLAG_FASTDCT
+        if result == -1:
+            logger.error('Turbojpeg error: %s'%turbojpeg.tjGetErrorStr() )
+        self._bgr_array = bgr_array
+        self._bgr_array.shape = self.height,self.width,channels
+
+
+    cdef jpeg2gray(self):
+        cdef int channels = 1
+        cdef int jpegSubsamp, j_width,j_height
+        cdef int result
+        # cdef unsigned char bgr_buffer[self.width*self.height*channels]
+        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(self.width*self.height*channels, dtype=np.uint8)
+        turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, &j_width, &j_height, &jpegSubsamp)
+        result = turbojpeg.tjDecompress2(self.tj_context, <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, 
+                                <unsigned char *> array.data, 
+                                j_width, 0, j_height, turbojpeg.TJPF_GRAY, 0)#turbojpeg.TJFLAG_FASTDCT
+        if result == -1:
+            logger.error('Turbojpeg error: %s'%turbojpeg.tjGetErrorStr() )
+        self._gray_array = array
+        self._gray_array.shape = self.height,self.width
 
 
 
@@ -116,7 +141,8 @@ cdef class Capture:
     cdef char *dev_name
     cdef bint _camera_streaming, _buffers_initialized
     cdef object _transport_formats, _frame_rates,_frame_sizes
-    cdef object _transport_format, _frame_rate, _frame_size
+    cdef object  _frame_rate, _frame_size # (rate_num,rate_den), (width,height)
+    cdef v4l2.__u32 _transport_format
 
     cdef bint _buffer_active
     cdef int _allocated_buf_n
@@ -166,6 +192,8 @@ cdef class Capture:
         self.close_device()
 
     def __dealloc__(self):
+        turbojpeg.tjDestroy(self.tj_context)
+
         if self.dev_handle != -1:
             self.close()
 
@@ -184,9 +212,9 @@ cdef class Capture:
         self.wait_for_buffer_avaible()
 
 
+        #deque the buffer
         self._active_buffer.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
         self._active_buffer.memory = v4l2.V4L2_MEMORY_MMAP
-
         if self.xioctl(v4l2.VIDIOC_DQBUF, &self._active_buffer) == -1:
             if errno == EAGAIN: # no buffer available yet.
                 raise Exception("Fixme")
@@ -198,14 +226,26 @@ cdef class Capture:
                 raise Exception("VIDIOC_DQBUF")
 
         self._buffer_active = True
+
+        # this is taken from the demo but it seams overly causious
         assert(self._active_buffer.index < self._allocated_buf_n)
 
-        print self._active_buffer.timestamp.tv_sec,',',self._active_buffer.timestamp.tv_usec,self._active_buffer.bytesused,self._active_buffer.index
+
+        #now we hold a valid frame
+        # print self._active_buffer.timestamp.tv_sec,',',self._active_buffer.timestamp.tv_usec,self._active_buffer.bytesused,self._active_buffer.index
         out_frame = Frame()
         out_frame.tj_context = self.tj_context
         out_frame.timestamp = <double>self._active_buffer.timestamp.tv_sec + <double>self._active_buffer.timestamp.tv_usec / 10e6
-
-
+        out_frame.width,out_frame.height = self._frame_size
+        if self._transport_format == v4l2.V4L2_PIX_FMT_MJPEG:
+            out_frame._jpeg_buffer.start = (<buffer_handle>self.buffers[self._active_buffer.index]).start
+            out_frame._jpeg_buffer.length = (<buffer_handle>self.buffers[self._active_buffer.index]).length
+        elif self._transport_format == v4l2.V4L2_PIX_FMT_YUYV:
+            out_frame._yuyv_buffer.start = (<buffer_handle>self.buffers[self._active_buffer.index]).start
+            out_frame._yuyv_buffer.length = (<buffer_handle>self.buffers[self._active_buffer.index]).length
+        else:
+            raise Exception("Reading Tranport format data '%s' is not implemented."%self.transport_format)
+        return out_frame
 
     cdef wait_for_buffer_avaible(self):
         cdef select.fd_set fds
@@ -369,7 +409,7 @@ cdef class Capture:
         format.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
         format.fmt.pix.width       = self.frame_size[0]
         format.fmt.pix.height      = self.frame_size[1]
-        format.fmt.pix.pixelformat = fourcc_u32(self.transport_format)
+        format.fmt.pix.pixelformat = self._transport_format
 
 
         format.fmt.pix.field       = v4l2.V4L2_FIELD_ANY
@@ -395,7 +435,7 @@ cdef class Capture:
             raise Exception("Could not get v4l2 format")
         else:
             self._frame_size = format.fmt.pix.width,format.fmt.pix.height
-            self._transport_format = fourcc_string(format.fmt.pix.pixelformat)
+            self._transport_format = format.fmt.pix.pixelformat
 
         cdef v4l2.v4l2_streamparm streamparm
         streamparm.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
@@ -482,16 +522,16 @@ cdef class Capture:
 
     property transport_format:
         def __get__(self):
-            return self._transport_format
+            return fourcc_string(self._transport_format)
 
         def __set__(self,val):
-            self._transport_format = val
-            self._frame_sizes = None
-            self._frame_rates = None
+            self._transport_format = fourcc_u32(val)
             self.stop()
             self.deinit_buffers()
             self.set_format()
             self.get_format()
+            self._frame_sizes = None
+            self._frame_rates = None
 
 
     property frame_size:

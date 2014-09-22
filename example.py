@@ -16,10 +16,14 @@ print cap.transport_format,cap.transport_formats
 
 cap.transport_format = 'MJPG'
 print cap.transport_format
-cap.frame_size = (1280, 720)
+cap.frame_size = (1920, 1080)
 cap.frame_rate=(1,30)
 print cap.transport_format,cap.frame_size,cap.frame_rate
-for x in range(300):
-	cap.get_frame()
+for x in range(600):
+	frame = cap.get_frame()
+	# print frame.width,frame.height
+	img = frame.gray
+	print img.shape	
+	# print img
 cap.close()
 cap = None
