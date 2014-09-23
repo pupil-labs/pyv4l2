@@ -59,9 +59,6 @@ cdef class Frame:
     cdef public int width,height, yuv_subsampling
 
     def __cinit__(self):
-        # self.tj_context
-        # self.width
-        # self.height
         self._jpeg_buffer.start = NULL
         self._yuyv_buffer.start = NULL
         self._bgr_array = None
@@ -74,7 +71,6 @@ cdef class Frame:
     property jpeg:
         def __set__(self,buffer_handle jpeg_handle):
             self._jpeg_buffer = jpeg_handle
-            # self._jpeg_buffer.length = jpeg_handle.length
 
         def __get__(self):
             #retuns buffer handle to jpeg buffer
@@ -225,7 +221,10 @@ cdef class Frame:
         cdef int jpegSubsamp, j_width,j_height
         cdef int result
 
-        turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, &j_width, &j_height, &jpegSubsamp)
+        turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, 
+                                        self._jpeg_buffer.length, 
+                                        &j_width, &j_height, &jpegSubsamp)
+
         cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(turbojpeg.tjBufSizeYUV2(j_width,2, j_height, jpegSubsamp), dtype=np.uint8)
 
         result =  turbojpeg.tjDecompressToYUV(self.tj_context, 
@@ -275,7 +274,18 @@ cdef class Frame:
         self._gray_array = None
         self._yuv_array = None
 
+
+
+
+
 cdef class Capture:
+    """
+    Video Capture class.
+    A Class giving access to a capture devices using the v4l2 provides drivers and userspace API.
+    The intent is to always grab mjpeg frames and give access to theses buffer using the Frame class.
+
+    All controls are exposed and can be enumerated using the controls list.
+    """
     cdef int dev_handle 
     cdef char *dev_name
     cdef bint _camera_streaming, _buffers_initialized
@@ -402,7 +412,6 @@ cdef class Capture:
 
             if r == 0:
                 raise Exception("select timeout")
-
             elif r == -1:
                 if errno != EINTR:
                     raise Exception("Select Error")
