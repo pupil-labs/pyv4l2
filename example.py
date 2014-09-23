@@ -21,21 +21,20 @@ cap.frame_rate=(1,30)
 print 'Will capture at:',cap.transport_format,cap.frame_size,cap.frame_rate
 for x in range(300):
 	frame = cap.get_frame()
+
 	# print frame.width,frame.height
-	img = frame.gray
-	cv2.imshow("test",img)
+	frame.bsdf
+	# y= frame.bgr
+	# print v.shape
+	# img = frame.bgr
+	# y,u,v = img
+	# cv2.imshow("img",img)
+	# cv2.imshow("u",u)
+	# cv2.imshow("v",v)
+
 	cv2.waitKey(1)
 	# print img
 cap.close()
 cap = None
 
 
-
-# if __name__ == '__main__':
-
-#     import cProfile,subprocess,os
-#     # cProfile.runctx("test()",{},locals(),"bench.pstats")
-#     # loc = os.path.abspath(__file__).rsplit('pupil_src', 1)
-#     gprof2dot_loc = 'gprof2dot.py'
-#     subprocess.call("python "+gprof2dot_loc+" -f pstats bench.pstats | dot -Tpng -o bench.png", shell=True)
-#     print "created cpu time graph for av_writer process. Please check out the png next to the av_writer.py file"

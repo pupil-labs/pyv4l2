@@ -56,7 +56,7 @@ cdef class Frame:
     cdef buffer_handle _jpeg_buffer,_yuyv_buffer
     cdef object _bgr_array, _gray_array,_yuv_array
     cdef public double timestamp
-    cdef public int width,height
+    cdef public int width,height, yuv_subsampling
 
     def __cinit__(self):
         # self.tj_context
@@ -80,16 +80,16 @@ cdef class Frame:
                 raise Exception("jpeg buffer not used and not allocated.")
             return self._jpeg_buffer
 
-    property yuyv:
-        def __set__(self,val):
-            raise Exception('read only')
-        def __get__(self):
-            '''
-            packed YUV. Not implemented
-            '''
-            if self._yuyv_buffer.start == NULL:
-                raise Exception("yuyv buffer not used and not allocated.")
-            return self._yuyv_buffer
+    # property yuyv:
+    #     def __set__(self,val):
+    #         raise Exception('read only')
+    #     def __get__(self):
+    #         '''
+    #         packed YUV. Not implemented.
+    #         '''
+    #         if self._yuyv_buffer.start == NULL:
+    #             raise Exception("yuyv buffer not used and not allocated.")
+    #         return self._yuyv_buffer
 
     property yuv:
         def __set__(self,val):
@@ -97,7 +97,12 @@ cdef class Frame:
         def __get__(self):
             '''
             planar YUV420 returned in 3 numpy arrays:
-            Y(height,width) U(height/2,width/2), V(height/2,width/2)
+            420 subsampling:
+                Y(height,width) U(height/2,width/2), V(height/2,width/2)
+            422 subsampling
+                Y(height,width) U(height,width/2), V(height,width/2)
+            444 subsampling
+                Y(height,width) U(height,width), V(height,width)
             '''
             if self._yuv_array is None:
                 if self._jpeg_buffer.start != NULL:
@@ -108,16 +113,35 @@ cdef class Frame:
                     raise Exception("No source image data found to convert from.")
 
             y_plane_len = self.width*self.height
-            uv_plan_len = y_plane_len/4
             Y = self._yuv_array[:y_plane_len]
-            offset = y_plane_len
-            U = self._yuv_array[offset:offset+uv_plan_len]
-            offset += uv_plan_len
-            V = self._yuv_array[offset:offset+uv_plan_len]
             Y.shape = (self.height,self.width)
-            U.shape = (self.height/2,self.width/2)
-            V.shape = (self.height/2,self.width/2)
 
+            if self.yuv_subsampling == turbojpeg.TJSAMP_422:
+                uv_plane_len = y_plane_len/2
+                offset = y_plane_len
+                U = self._yuv_array[offset:offset+uv_plane_len]
+                offset += uv_plane_len
+                V = self._yuv_array[offset:offset+uv_plane_len]
+                U.shape = (self.height,self.width/2)
+                V.shape = (self.height,self.width/2)
+            elif self.yuv_subsampling == turbojpeg.TJSAMP_420:
+                uv_plane_len = y_plane_len/4
+                offset = y_plane_len
+                U = self._yuv_array[offset:offset+uv_plane_len]
+                offset += uv_plane_len
+                V = self._yuv_array[offset:offset+uv_plane_len]
+                U.shape = (self.height/2,self.width/2)
+                V.shape = (self.height/2,self.width/2)
+            elif self.yuv_subsampling == turbojpeg.TJSAMP_444:
+                uv_plane_len = y_plane_len
+                offset = y_plane_len
+                U = self._yuv_array[offset:offset+uv_plane_len]
+                offset += uv_plane_len
+                V = self._yuv_array[offset:offset+uv_plane_len]
+                U.shape = (self.height,self.width)
+                V.shape = (self.height,self.width)
+            else:
+                raise Exception("YUV subsamling other than 420 and 422 is not implemented.")
             return Y,U,V
 
     property gray:      
@@ -154,20 +178,20 @@ cdef class Frame:
             raise Exception('read only')
         def __get__(self):
             if self._bgr_array is None:
-                if self._jpeg_buffer.start != NULL:
-                    self.jpeg2bgr()
-                elif self._jpeg_buffer.start != NULL:
-                    self.yuyv2bgr() 
-                else:
-                    raise Exception("No source image data found to convert from.")
+                #toggle conversion if needed
+                _ = self.yuv
+                self.yuv2bgr()
+
+                # direct conversion method.
+                # if self._jpeg_buffer.start != NULL:
+                #     self.jpeg2bgr()
+                # elif self._jpeg_buffer.start != NULL:
+                #     self.yuyv2bgr() 
+                # else:
+                #     raise Exception("No source image data found to convert from.")
             return self._bgr_array
 
 
-    property rgb:      
-        def __set__(self,val):
-            raise Exception('read only')
-        def __get__(self):
-            raise Exception("RGB is not implemented. Conversion from BGR can be done with Numpy views.")
 
     #for legacy reasons.
     property img:      
@@ -180,52 +204,75 @@ cdef class Frame:
         raise Exception("Conversion from packed yuyv not implemented.")
 
 
-    cdef jpeg2bgr(self):
+    cdef yuv2bgr(self):
+        #2.75 ms at 1080p
         cdef int channels = 3
-        cdef int jpegSubsamp, j_width,j_height
         cdef int result
-        cdef np.ndarray[np.uint8_t, ndim=1] bgr_array = np.empty(self.width*self.height*channels, dtype=np.uint8)
-        turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, &j_width, &j_height, &jpegSubsamp)
-        result = turbojpeg.tjDecompress2(self.tj_context, <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, 
-                                <unsigned char *> bgr_array.data, 
-                                j_width, 0, j_height, turbojpeg.TJPF_BGR, 0)#turbojpeg.TJFLAG_FASTDCT
+        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(self.width*self.height*channels, dtype=np.uint8)
+        cdef np.ndarray[np.uint8_t, ndim=1] in_array = self._yuv_array
+        result = turbojpeg.tjDecodeYUV(self.tj_context,  <unsigned char *>in_array.data, 4, turbojpeg.TJSAMP_422, 
+                                        <unsigned char *> array.data, self.width, 0, self.height, turbojpeg.TJPF_BGR, 0)
         if result == -1:
-            logger.error('Turbojpeg error: %s'%turbojpeg.tjGetErrorStr() )
-        self._bgr_array = bgr_array
+            logger.error('Turbojpeg yuv2bgr error: %s'%turbojpeg.tjGetErrorStr() )
+        self._bgr_array = array
         self._bgr_array.shape = self.height,self.width,channels
 
 
-    cdef jpeg2gray(self):
-        cdef int channels = 1
-        cdef int jpegSubsamp, j_width,j_height
-        cdef int result
-        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(self.width*self.height*channels, dtype=np.uint8)
-        turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, &j_width, &j_height, &jpegSubsamp)
-        result = turbojpeg.tjDecompress2(self.tj_context, <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, 
-                                <unsigned char *> array.data, 
-                                j_width, 0, j_height, turbojpeg.TJPF_GRAY, 0)#turbojpeg.TJFLAG_FASTDCT
-        if result == -1:
-            logger.error('Turbojpeg error: %s'%turbojpeg.tjGetErrorStr() )
-        self._gray_array = array
-        self._gray_array.shape = self.height,self.width
-
-
     cdef jpeg2yuv(self):
+        # 7.55 ms on 1080p
         cdef int channels = 1
         cdef int jpegSubsamp, j_width,j_height
         cdef int result
 
         turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, &j_width, &j_height, &jpegSubsamp)
+        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(turbojpeg.tjBufSizeYUV2(j_width,2, j_height, jpegSubsamp), dtype=np.uint8)
 
-        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(turbojpeg.tjBufSizeYUV(j_width, j_height, jpegSubsamp), dtype=np.uint8)
-        
-        result =  turbojpeg.tjDecompressToYUV(self.tj_context, <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length,
-                                             <unsigned char *> array.data, 0)
-
+        result =  turbojpeg.tjDecompressToYUV(self.tj_context, 
+                                             <unsigned char *>self._jpeg_buffer.start, 
+                                             self._jpeg_buffer.length,
+                                             <unsigned char *> array.data,
+                                              0)
         if result == -1:
-            logger.error('Turbojpeg error: %s'%turbojpeg.tjGetErrorStr() )
+            logger.error('Turbojpeg jpeg2yuv error: %s'%turbojpeg.tjGetErrorStr() )
         self._yuv_array = array
+        self.yuv_subsampling = jpegSubsamp
 
+    # cdef jpeg2bgr(self):
+    #     #10.66ms on 1080p
+    #     cdef int channels = 3
+    #     cdef int jpegSubsamp, j_width,j_height
+    #     cdef int result
+    #     cdef np.ndarray[np.uint8_t, ndim=1] bgr_array = np.empty(self.width*self.height*channels, dtype=np.uint8)
+    #     turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, &j_width, &j_height, &jpegSubsamp)
+    #     result = turbojpeg.tjDecompress2(self.tj_context, <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, 
+    #                             <unsigned char *> bgr_array.data, 
+    #                             j_width, 0, j_height, turbojpeg.TJPF_BGR, 0)#turbojpeg.TJFLAG_FASTDCT
+    #     if result == -1:
+    #         logger.error('Turbojpeg jpeg2bgr error: %s'%turbojpeg.tjGetErrorStr() )
+    #     self._bgr_array = bgr_array
+    #     self._bgr_array.shape = self.height,self.width,channels
+
+
+    # cdef jpeg2gray(self):
+    #     #6.02ms on 1080p
+    #     cdef int channels = 1
+    #     cdef int jpegSubsamp, j_width,j_height
+    #     cdef int result
+    #     cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(self.width*self.height*channels, dtype=np.uint8)
+    #     turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, &j_width, &j_height, &jpegSubsamp)
+    #     result = turbojpeg.tjDecompress2(self.tj_context, <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, 
+    #                             <unsigned char *> array.data, 
+    #                             j_width, 0, j_height, turbojpeg.TJPF_GRAY, 0)#turbojpeg.TJFLAG_FASTDCT
+
+    #     if result == -1:
+    #         logger.error('Turbojpeg jpeg2gray error: %s'%turbojpeg.tjGetErrorStr() )
+    #     self._gray_array = array
+    #     self._gray_array.shape = self.height,self.width
+
+    def clear_caches(self):
+        self._bgr_array = None
+        self._gray_array = None
+        self._yuv_array = None
 
 cdef class Capture:
     cdef int dev_handle 
