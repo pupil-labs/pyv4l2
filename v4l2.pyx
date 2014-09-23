@@ -7,8 +7,8 @@ from libc.string cimport strerror
 cimport cmman as mman
 cimport cselect as select
 cimport cv4l2 as v4l2
-cimport cturbojpeg as turbojpeg
-# cimport cv4lconvert as v4lconvert
+# cimport cturbojpeg as turbojpeg
+cimport cv4lconvert as v4lconvert
 cimport numpy as np
 import numpy as np
 
@@ -52,11 +52,11 @@ cdef class Frame:
     Previously converted formats are still valid.
     '''
 
-    cdef turbojpeg.tjhandle tj_context
+    cdef v4lconvert.v4lconvert_data * cvt_context
     cdef buffer_handle _jpeg_buffer,_yuyv_buffer
     cdef object _bgr_array, _gray_array,_yuv_array
     cdef public double timestamp
-    cdef public int width,height, yuv_subsampling
+    cdef public int width,height
 
     def __cinit__(self):
         self._jpeg_buffer.start = NULL
@@ -114,32 +114,14 @@ cdef class Frame:
             Y = self._yuv_array[:y_plane_len]
             Y.shape = (self.height,self.width)
 
-            if self.yuv_subsampling == turbojpeg.TJSAMP_422:
-                uv_plane_len = y_plane_len/2
-                offset = y_plane_len
-                U = self._yuv_array[offset:offset+uv_plane_len]
-                offset += uv_plane_len
-                V = self._yuv_array[offset:offset+uv_plane_len]
-                U.shape = (self.height,self.width/2)
-                V.shape = (self.height,self.width/2)
-            elif self.yuv_subsampling == turbojpeg.TJSAMP_420:
-                uv_plane_len = y_plane_len/4
-                offset = y_plane_len
-                U = self._yuv_array[offset:offset+uv_plane_len]
-                offset += uv_plane_len
-                V = self._yuv_array[offset:offset+uv_plane_len]
-                U.shape = (self.height/2,self.width/2)
-                V.shape = (self.height/2,self.width/2)
-            elif self.yuv_subsampling == turbojpeg.TJSAMP_444:
-                uv_plane_len = y_plane_len
-                offset = y_plane_len
-                U = self._yuv_array[offset:offset+uv_plane_len]
-                offset += uv_plane_len
-                V = self._yuv_array[offset:offset+uv_plane_len]
-                U.shape = (self.height,self.width)
-                V.shape = (self.height,self.width)
-            else:
-                raise Exception("YUV subsamling other than 420 and 422 is not implemented.")
+            uv_plane_len = y_plane_len/4
+            offset = y_plane_len
+            U = self._yuv_array[offset:offset+uv_plane_len]
+            offset += uv_plane_len
+            V = self._yuv_array[offset:offset+uv_plane_len]
+            U.shape = (self.height/2,self.width/2)
+            V.shape = (self.height/2,self.width/2)
+        
             return Y,U,V
 
     property gray:      
@@ -205,12 +187,34 @@ cdef class Frame:
         #2.75 ms at 1080p
         cdef int channels = 3
         cdef int result
-        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(self.width*self.height*channels, dtype=np.uint8)
+        cdef v4l2.v4l2_format  src_format,dst_format
+        src_format.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+        src_format.fmt.pix.width       = self.width
+        src_format.fmt.pix.height      = self.height
+        src_format.fmt.pix.pixelformat = v4l2.V4L2_PIX_FMT_YUV420
+
+        dst_format.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+        dst_format.fmt.pix.width       = self.width
+        dst_format.fmt.pix.height      = self.height
+        dst_format.fmt.pix.pixelformat = v4l2.V4L2_PIX_FMT_BGR24
+
+        result = v4lconvert.v4lconvert_try_format(self.cvt_context,
+                                            &dst_format, # in / out
+                                            &src_format) # out
+
+
+        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(self.width*self.height*channels, dtype=np.uint8) #BGR*
         cdef np.ndarray[np.uint8_t, ndim=1] in_array = self._yuv_array
-        result = turbojpeg.tjDecodeYUV(self.tj_context,  <unsigned char *>in_array.data, 4, turbojpeg.TJSAMP_422, 
-                                        <unsigned char *> array.data, self.width, 0, self.height, turbojpeg.TJPF_BGR, 0)
+        result =  v4lconvert.v4lconvert_convert(self.cvt_context, 
+                                            &src_format,
+                                            &dst_format,
+                                             <unsigned char *>in_array.data, 
+                                             in_array.shape[0],
+                                             <unsigned char *> array.data,
+                                             array.shape[0])
+
         if result == -1:
-            logger.error('Turbojpeg yuv2bgr error: %s'%turbojpeg.tjGetErrorStr() )
+            logger.error('v4lconvert yuv2bgr error: %s'%v4lconvert.v4lconvert_get_error_message(self.cvt_context) )
         self._bgr_array = array
         self._bgr_array.shape = self.height,self.width,channels
 
@@ -218,56 +222,41 @@ cdef class Frame:
     cdef jpeg2yuv(self):
         # 7.55 ms on 1080p
         cdef int channels = 1
-        cdef int jpegSubsamp, j_width,j_height
         cdef int result
+        cdef v4l2.v4l2_format  src_format,dst_format
+        src_format.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+        src_format.fmt.pix.width       = self.width
+        src_format.fmt.pix.height      = self.height
+        src_format.fmt.pix.pixelformat = v4l2.V4L2_PIX_FMT_MJPEG
 
-        turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, 
-                                        self._jpeg_buffer.length, 
-                                        &j_width, &j_height, &jpegSubsamp)
+        dst_format.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+        dst_format.fmt.pix.width       = self.width
+        dst_format.fmt.pix.height      = self.height
+        dst_format.fmt.pix.pixelformat = v4l2.V4L2_PIX_FMT_YUV420
 
-        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(turbojpeg.tjBufSizeYUV2(j_width,2, j_height, jpegSubsamp), dtype=np.uint8)
 
-        result =  turbojpeg.tjDecompressToYUV(self.tj_context, 
+        result = v4lconvert.v4lconvert_try_format(self.cvt_context,
+                                            &dst_format, # in / out
+                                            &src_format) # out
+        print dst_format.fmt.pix.sizeimage
+        print dst_format.fmt.pix.bytesperline
+
+        if result == -1:
+            logger.error('v4lconvert jpeg2yuv error: %s'%v4lconvert.v4lconvert_get_error_message(self.cvt_context) )
+
+        cdef np.ndarray[np.uint8_t, ndim=1] array = np.zeros(dst_format.fmt.pix.sizeimage, dtype=np.uint8) #uvc420p size
+        result =  v4lconvert.v4lconvert_convert(self.cvt_context, 
+                                            &src_format,
+                                            &dst_format,
                                              <unsigned char *>self._jpeg_buffer.start, 
                                              self._jpeg_buffer.length,
                                              <unsigned char *> array.data,
-                                              0)
+                                             array.shape[0])
+        print "converted %s"%result
         if result == -1:
-            logger.error('Turbojpeg jpeg2yuv error: %s'%turbojpeg.tjGetErrorStr() )
+            logger.error('v4lconvert jpeg2yuv error: %s'%v4lconvert.v4lconvert_get_error_message(self.cvt_context) )
         self._yuv_array = array
-        self.yuv_subsampling = jpegSubsamp
 
-    # cdef jpeg2bgr(self):
-    #     #10.66ms on 1080p
-    #     cdef int channels = 3
-    #     cdef int jpegSubsamp, j_width,j_height
-    #     cdef int result
-    #     cdef np.ndarray[np.uint8_t, ndim=1] bgr_array = np.empty(self.width*self.height*channels, dtype=np.uint8)
-    #     turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, &j_width, &j_height, &jpegSubsamp)
-    #     result = turbojpeg.tjDecompress2(self.tj_context, <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, 
-    #                             <unsigned char *> bgr_array.data, 
-    #                             j_width, 0, j_height, turbojpeg.TJPF_BGR, 0)#turbojpeg.TJFLAG_FASTDCT
-    #     if result == -1:
-    #         logger.error('Turbojpeg jpeg2bgr error: %s'%turbojpeg.tjGetErrorStr() )
-    #     self._bgr_array = bgr_array
-    #     self._bgr_array.shape = self.height,self.width,channels
-
-
-    # cdef jpeg2gray(self):
-    #     #6.02ms on 1080p
-    #     cdef int channels = 1
-    #     cdef int jpegSubsamp, j_width,j_height
-    #     cdef int result
-    #     cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(self.width*self.height*channels, dtype=np.uint8)
-    #     turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, &j_width, &j_height, &jpegSubsamp)
-    #     result = turbojpeg.tjDecompress2(self.tj_context, <unsigned char *>self._jpeg_buffer.start, self._jpeg_buffer.length, 
-    #                             <unsigned char *> array.data, 
-    #                             j_width, 0, j_height, turbojpeg.TJPF_GRAY, 0)#turbojpeg.TJFLAG_FASTDCT
-
-    #     if result == -1:
-    #         logger.error('Turbojpeg jpeg2gray error: %s'%turbojpeg.tjGetErrorStr() )
-    #     self._gray_array = array
-    #     self._gray_array.shape = self.height,self.width
 
     def clear_caches(self):
         self._bgr_array = None
@@ -298,7 +287,7 @@ cdef class Capture:
     cdef v4l2.v4l2_buffer _active_buffer
     cdef list buffers
 
-    cdef turbojpeg.tjhandle tj_context
+    cdef v4lconvert.v4lconvert_data * cvt_context
 
     def __cinit__(self,char *dev_name):
         pass
@@ -332,7 +321,7 @@ cdef class Capture:
         #
         #
         #setup for jpeg converter
-        self.tj_context = turbojpeg.tjInitDecompress()
+        self.cvt_context = v4lconvert.v4lconvert_create(self.dev_handle)
 
         #set some sane defaults:
         self.transport_format = 'MJPG'
@@ -344,7 +333,7 @@ cdef class Capture:
         self.close_device()
 
     def __dealloc__(self):
-        turbojpeg.tjDestroy(self.tj_context)
+        v4lconvert.v4lconvert_destroy(self.cvt_context)
 
         if self.dev_handle != -1:
             self.close()
@@ -377,6 +366,7 @@ cdef class Capture:
             else:
                 raise Exception("VIDIOC_DQBUF")
 
+
         self._buffer_active = True
 
         # this is taken from the demo but it seams overly causious
@@ -386,7 +376,7 @@ cdef class Capture:
         #now we hold a valid frame
         # print self._active_buffer.timestamp.tv_sec,',',self._active_buffer.timestamp.tv_usec,self._active_buffer.bytesused,self._active_buffer.index
         out_frame = Frame()
-        out_frame.tj_context = self.tj_context
+        out_frame.cvt_context = self.cvt_context
         out_frame.timestamp = <double>self._active_buffer.timestamp.tv_sec + <double>self._active_buffer.timestamp.tv_usec / 10e6
         out_frame.width,out_frame.height = self._frame_size
         
