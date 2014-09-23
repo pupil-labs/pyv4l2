@@ -30,7 +30,8 @@ cpdef v4l2.__u32 fourcc_u32(char * fourcc):
 cdef class buffer_handle:
     cdef void *start
     cdef size_t length
-         
+      
+
     
 cdef class Frame:
     '''
@@ -52,7 +53,6 @@ cdef class Frame:
     '''
 
     cdef turbojpeg.tjhandle tj_context
-
     cdef buffer_handle _jpeg_buffer,_yuyv_buffer
     cdef object _bgr_array, _gray_array,_yuv_array
     cdef public double timestamp
@@ -72,8 +72,10 @@ cdef class Frame:
 
 
     property jpeg:
-        def __set__(self,val):
-            raise Exception('read only')
+        def __set__(self,buffer_handle jpeg_handle):
+            self._jpeg_buffer = jpeg_handle
+            # self._jpeg_buffer.length = jpeg_handle.length
+
         def __get__(self):
             #retuns buffer handle to jpeg buffer
             if self._jpeg_buffer.start == NULL:
@@ -190,7 +192,6 @@ cdef class Frame:
                 # else:
                 #     raise Exception("No source image data found to convert from.")
             return self._bgr_array
-
 
 
     #for legacy reasons.
@@ -378,15 +379,14 @@ cdef class Capture:
         out_frame.tj_context = self.tj_context
         out_frame.timestamp = <double>self._active_buffer.timestamp.tv_sec + <double>self._active_buffer.timestamp.tv_usec / 10e6
         out_frame.width,out_frame.height = self._frame_size
+        
         if self._transport_format == v4l2.V4L2_PIX_FMT_MJPEG:
-            out_frame._jpeg_buffer.start = (<buffer_handle>self.buffers[self._active_buffer.index]).start
-            out_frame._jpeg_buffer.length = (<buffer_handle>self.buffers[self._active_buffer.index]).length
+            out_frame.jpeg  = <buffer_handle>self.buffers[self._active_buffer.index]
         elif self._transport_format == v4l2.V4L2_PIX_FMT_YUYV:
-            out_frame._yuyv_buffer.start = (<buffer_handle>self.buffers[self._active_buffer.index]).start
-            out_frame._yuyv_buffer.length = (<buffer_handle>self.buffers[self._active_buffer.index]).length
+            out_frame._yuyv_buffer = <buffer_handle>self.buffers[self._active_buffer.index]
         else:
             raise Exception("Reading Tranport format data '%s' is not implemented."%self.transport_format)
-        return <object>out_frame
+        return out_frame
 
     cdef wait_for_buffer_avaible(self):
         cdef select.fd_set fds
@@ -395,7 +395,7 @@ cdef class Capture:
         while True:
             select.FD_ZERO(&fds)
             select.FD_SET(self.dev_handle, &fds)
-            tv.tv_sec = 1
+            tv.tv_sec = 3
             tv.tv_usec = 0
 
             r = select.select(self.dev_handle + 1, &fds, NULL, NULL, &tv)
