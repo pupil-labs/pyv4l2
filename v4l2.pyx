@@ -386,7 +386,7 @@ cdef class Capture:
             out_frame._yuyv_buffer.length = (<buffer_handle>self.buffers[self._active_buffer.index]).length
         else:
             raise Exception("Reading Tranport format data '%s' is not implemented."%self.transport_format)
-        return out_frame
+        return <object>out_frame
 
     cdef wait_for_buffer_avaible(self):
         cdef select.fd_set fds
