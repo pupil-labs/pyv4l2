@@ -59,11 +59,12 @@ cdef class Frame:
     cdef public int width,height, yuv_subsampling
 
     def __cinit__(self):
-        self._jpeg_buffer.start = NULL
-        self._yuyv_buffer.start = NULL
+        # pass        
+        # self._jpeg_buffer.start = NULL doing this leads to the very strange behaivour of numpy slciing to break!
+        # self._yuyv_buffer.start = NULL 
         self._bgr_array = None
         self._gray_array = None
-
+        # pass
     def __init__(self):
         pass
 
@@ -112,11 +113,11 @@ cdef class Frame:
 
             uv_plane_len = y_plane_len/2
             offset = y_plane_len
-            U = self._yuv_array[offset:offset+uv_plane_len]
+            U = np.array(self._yuv_array[offset:offset+uv_plane_len])
             offset += uv_plane_len
-            V = self._yuv_array[offset:offset+uv_plane_len]
-            U.shape = (self.height,self.width/2)
-            V.shape = (self.height,self.width/2)
+            V = np.array(self._yuv_array[offset:offset+uv_plane_len])
+            U.shape = (self.height,self.width/2,1)
+            V.shape = (self.height,self.width/2,1)
 
             U = U[::2,:]
             V = V[::2,:]
@@ -377,6 +378,7 @@ cdef class Capture:
         else:
             raise Exception("Reading Tranport format data '%s' is not implemented."%self.transport_format)
         return out_frame
+
 
     cdef wait_for_buffer_avaible(self):
         cdef select.fd_set fds
