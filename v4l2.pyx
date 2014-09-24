@@ -30,6 +30,9 @@ cpdef v4l2.__u32 fourcc_u32(char * fourcc):
 cdef class buffer_handle:
     cdef void *start
     cdef size_t length
+
+    def __repr__(self):
+        return  "Buffer pointing to %s. length: %s"%(<int>self.start,self.length)
       
 
     
@@ -53,25 +56,24 @@ cdef class Frame:
     '''
 
     cdef turbojpeg.tjhandle tj_context
-    cdef buffer_handle _jpeg_buffer,_yuyv_buffer
-    cdef object _bgr_array, _gray_array,_yuv_array
+    cdef buffer_handle _jpeg_buffer
+    cdef unsigned char[:] _bgr_buffer, _gray_buffer,_yuv_buffer #we use numpy for memory management.
+    cdef bint _yuv_converted, _bgr_converted
     cdef public double timestamp
     cdef public int width,height, yuv_subsampling
 
     def __cinit__(self):
         # pass        
-        # self._jpeg_buffer.start = NULL doing this leads to the very strange behaivour of numpy slciing to break!
-        # self._yuyv_buffer.start = NULL 
-        self._bgr_array = None
-        self._gray_array = None
-        # pass
+        # self._jpeg_buffer.start = NULL doing this leads to the very strange behaivour of numpy slicing to break!
+        self._yuv_converted = False
+        self._bgr_converted = False
     def __init__(self):
         pass
 
 
-    property jpeg:
-        def __set__(self,buffer_handle jpeg_handle):
-            self._jpeg_buffer = jpeg_handle
+    property jpeg_buffer:
+        def __set__(self,buffer_handle new_buffer):
+            self._jpeg_buffer = new_buffer
 
         def __get__(self):
             #retuns buffer handle to jpeg buffer
@@ -79,16 +81,23 @@ cdef class Frame:
                 raise Exception("jpeg buffer not used and not allocated.")
             return self._jpeg_buffer
 
-    # property yuyv:
-    #     def __set__(self,val):
-    #         raise Exception('read only')
-    #     def __get__(self):
-    #         '''
-    #         packed YUV. Not implemented.
-    #         '''
-    #         if self._yuyv_buffer.start == NULL:
-    #             raise Exception("yuyv buffer not used and not allocated.")
-    #         return self._yuyv_buffer
+
+    property yuv422_buffer:
+        def __set__(self,buffer_handle new_buffer):
+            raise Exception('Read only')
+
+        def __get__(self):
+            #retuns buffer handle to yuv422 buffer
+            if self._yuv_converted == False:
+                if self._jpeg_buffer.start != NULL:
+                    self.jpeg2yuv()
+                else:
+                    raise Exception("No source image data found to convert from.")
+            cdef buffer_handle buf = buffer_handle()
+            buf.start = <void*>(&self._yuv_buffer[0])
+            buf.length = self._yuv_buffer.shape[0]
+            return buf
+
 
     property yuv:
         def __set__(self,val):
@@ -99,26 +108,24 @@ cdef class Frame:
             420 subsampling:
                 Y(height,width) U(height/2,width/2), V(height/2,width/2)
             '''
-            if self._yuv_array is None:
+            if self._yuv_converted is False:
                 if self._jpeg_buffer.start != NULL:
                     self.jpeg2yuv()
-                elif self._yuyv_buffer.start != NULL:
-                    self.yuyu2yuv()
                 else:
                     raise Exception("No source image data found to convert from.")
 
+            cdef np.ndarray[np.uint8_t, ndim=2] Y,U,V
             y_plane_len = self.width*self.height
-            Y = self._yuv_array[:y_plane_len]
-            Y.shape = (self.height,self.width)
+            Y = np.asarray(self._yuv_buffer[:y_plane_len]).reshape(self.height,self.width)
 
             uv_plane_len = y_plane_len/2
             offset = y_plane_len
-            U = np.array(self._yuv_array[offset:offset+uv_plane_len])
+            U = np.asarray(self._yuv_buffer[offset:offset+uv_plane_len]).reshape(self.height,self.width/2)
             offset += uv_plane_len
-            V = np.array(self._yuv_array[offset:offset+uv_plane_len])
-            U.shape = (self.height,self.width/2,1)
-            V.shape = (self.height,self.width/2,1)
+            V = np.asarray(self._yuv_buffer[offset:offset+uv_plane_len]).reshape(self.height,self.width/2)
 
+
+            #hack solution to go from YUV422 to YUV420
             U = U[::2,:]
             V = V[::2,:]
             return Y,U,V
@@ -131,44 +138,26 @@ cdef class Frame:
             if self._yuv_array is None:
                 if self._jpeg_buffer.start != NULL:
                     self.jpeg2yuv()
-                elif self._yuyv_buffer.start != NULL:
-                    self.yuyu2yuv()
                 else:
                     raise Exception("No source image data found to convert from.")
-
-            Y = self._yuv_array[:self.width*self.height]
-            Y.shape = (self.height,self.width)
+            cdef np.ndarray[np.uint8_t, ndim=2] Y
+            Y = np.asarray(self._yuv_buffer[:self.width*self.height]).reshape(self.height,self.width)
             return Y
 
 
-            # return gray from direct jpeg conversion
-            # if self._yuv_array is None:
-            #     if self._jpeg_buffer.start != NULL:
-            #         self.jpeg2gray()
-            #     elif self._yuyv_buffer.start != NULL:
-            #         self.yuyu2gray()
-            #     else:
-            #         raise Exception("No source image data found to convert from.")
-
-            # return self._gray_array
 
     property bgr:      
         def __set__(self,val):
             raise Exception('read only')
         def __get__(self):
-            if self._bgr_array is None:
+            if self._bgr_converted is False:
                 #toggle conversion if needed
                 _ = self.yuv
                 self.yuv2bgr()
 
-                # direct conversion method.
-                # if self._jpeg_buffer.start != NULL:
-                #     self.jpeg2bgr()
-                # elif self._jpeg_buffer.start != NULL:
-                #     self.yuyv2bgr() 
-                # else:
-                #     raise Exception("No source image data found to convert from.")
-            return self._bgr_array
+            cdef np.ndarray[np.uint8_t, ndim=3] BGR
+            BGR = np.asarray(self._bgr_buffer).reshape(self.height,self.width,3)
+            return BGR
 
 
     #for legacy reasons.
@@ -178,22 +167,19 @@ cdef class Frame:
         def __get__(self):
             return self.bgr
 
-    cdef yuyv2bgr(self):
-        raise Exception("Conversion from packed yuyv not implemented.")
 
 
     cdef yuv2bgr(self):
         #2.75 ms at 1080p
         cdef int channels = 3
         cdef int result
-        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(self.width*self.height*channels, dtype=np.uint8)
-        cdef np.ndarray[np.uint8_t, ndim=1] in_array = self._yuv_array
-        result = turbojpeg.tjDecodeYUV(self.tj_context,  <unsigned char *>in_array.data, 4, turbojpeg.TJSAMP_422, 
-                                        <unsigned char *> array.data, self.width, 0, self.height, turbojpeg.TJPF_BGR, 0)
+        self._bgr_buffer = np.empty(self.width*self.height*channels, dtype=np.uint8)
+        result = turbojpeg.tjDecodeYUV(self.tj_context, &self._yuv_buffer[0], 4, turbojpeg.TJSAMP_422, 
+                                        &self._bgr_buffer[0], self.width, 0, self.height, turbojpeg.TJPF_BGR, 0)
         if result == -1:
             logger.error('Turbojpeg yuv2bgr error: %s'%turbojpeg.tjGetErrorStr() )
-        self._bgr_array = array
-        self._bgr_array.shape = self.height,self.width,channels
+        self._bgr_converted = True
+
 
 
     cdef jpeg2yuv(self):
@@ -206,18 +192,17 @@ cdef class Frame:
                                         self._jpeg_buffer.length, 
                                         &j_width, &j_height, &jpegSubsamp)
 
-        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(turbojpeg.tjBufSizeYUV2(j_width,2, j_height, jpegSubsamp), dtype=np.uint8)
+        self._yuv_buffer = np.empty(turbojpeg.tjBufSizeYUV2(j_width,2, j_height, jpegSubsamp), dtype=np.uint8)
 
         result =  turbojpeg.tjDecompressToYUV(self.tj_context, 
                                              <unsigned char *>self._jpeg_buffer.start, 
                                              self._jpeg_buffer.length,
-                                             <unsigned char *> array.data,
+                                             &self._yuv_buffer[0],
                                               0)
         if result == -1:
             logger.error('Turbojpeg jpeg2yuv error: %s'%turbojpeg.tjGetErrorStr() )
-        self._yuv_array = array
         self.yuv_subsampling = jpegSubsamp
-
+        self._yuv_converted = True
     # cdef jpeg2bgr(self):
     #     #10.66ms on 1080p
     #     cdef int channels = 3
@@ -251,9 +236,8 @@ cdef class Frame:
     #     self._gray_array.shape = self.height,self.width
 
     def clear_caches(self):
-        self._bgr_array = None
-        self._gray_array = None
-        self._yuv_array = None
+        self._bgr_converted = False
+        self._yuv_converted = False
 
 
 
@@ -363,7 +347,6 @@ cdef class Capture:
         # this is taken from the demo but it seams overly causious
         assert(self._active_buffer.index < self._allocated_buf_n)
 
-
         #now we hold a valid frame
         # print self._active_buffer.timestamp.tv_sec,',',self._active_buffer.timestamp.tv_usec,self._active_buffer.bytesused,self._active_buffer.index
         out_frame = Frame()
@@ -371,10 +354,15 @@ cdef class Capture:
         out_frame.timestamp = <double>self._active_buffer.timestamp.tv_sec + <double>self._active_buffer.timestamp.tv_usec / 10e6
         out_frame.width,out_frame.height = self._frame_size
         
+        cdef buffer_handle new_buf = buffer_handle()
+        new_buf.start = (<buffer_handle>self.buffers[self._active_buffer.index]).start
+        new_buf.length = self._active_buffer.bytesused
+
+
         if self._transport_format == v4l2.V4L2_PIX_FMT_MJPEG:
-            out_frame.jpeg  = <buffer_handle>self.buffers[self._active_buffer.index]
+            out_frame.jpeg_buffer  = new_buf
         elif self._transport_format == v4l2.V4L2_PIX_FMT_YUYV:
-            out_frame._yuyv_buffer = <buffer_handle>self.buffers[self._active_buffer.index]
+            out_frame._yuyv_buffer = new_buf
         else:
             raise Exception("Reading Tranport format data '%s' is not implemented."%self.transport_format)
         return out_frame
