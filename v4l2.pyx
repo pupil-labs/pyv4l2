@@ -12,6 +12,7 @@ cimport cv4lconvert as v4lconvert
 cimport numpy as np
 import numpy as np
 
+from cpython.mem cimport PyMem_Malloc, PyMem_Realloc, PyMem_Free
 
 #logging
 import logging
@@ -53,6 +54,7 @@ cdef class Frame:
     '''
 
     cdef v4lconvert.v4lconvert_data * cvt_context
+    cdef  unsigned char *array 
     cdef buffer_handle _jpeg_buffer,_yuyv_buffer
     cdef object _bgr_array, _gray_array,_yuv_array
     cdef public double timestamp
@@ -159,7 +161,8 @@ cdef class Frame:
         def __get__(self):
             if self._bgr_array is None:
                 #toggle conversion if needed
-                _ = self.yuv
+                # _ = self.yuv
+                self.jpeg2yuv()
                 self.yuv2bgr()
 
                 # direct conversion method.
@@ -203,13 +206,13 @@ cdef class Frame:
                                             &src_format) # out
 
 
-        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(self.width*self.height*channels, dtype=np.uint8) #BGR*
+        cdef np.ndarray[np.uint8_t, ndim=1] array = np.empty(dst_format.fmt.pix.sizeimage, dtype=np.uint8) #BGR*
         cdef np.ndarray[np.uint8_t, ndim=1] in_array = self._yuv_array
         result =  v4lconvert.v4lconvert_convert(self.cvt_context, 
                                             &src_format,
                                             &dst_format,
                                              <unsigned char *>in_array.data, 
-                                             in_array.shape[0],
+                                             in_array.shape[0]-100000,
                                              <unsigned char *> array.data,
                                              array.shape[0])
 
@@ -244,25 +247,36 @@ cdef class Frame:
         if result == -1:
             logger.error('v4lconvert jpeg2yuv error: %s'%v4lconvert.v4lconvert_get_error_message(self.cvt_context) )
 
-        cdef np.ndarray[np.uint8_t, ndim=1] array = np.zeros(dst_format.fmt.pix.sizeimage*2, dtype=np.uint8) #uvc420p size
+
+        # cdef np.ndarray[np.uint8_t, ndim=1] array = np.zeros(dst_format.fmt.pix.sizeimage+20000, dtype=np.uint8) #uvc420p size
+        array  =  <unsigned char *>PyMem_Malloc(dst_format.fmt.pix.sizeimage * sizeof(unsigned char))
         result =  v4lconvert.v4lconvert_convert(self.cvt_context, 
                                             &src_format,
                                             &dst_format,
                                              <unsigned char *>self._jpeg_buffer.start, 
                                              self._jpeg_buffer.length,
-                                             <unsigned char *> array.data,
-                                             array.shape[0])
+                                             array,
+                                             dst_format.fmt.pix.sizeimage)
         # print "converted %s"%result
         if result == -1:
             logger.error('v4lconvert jpeg2yuv error: %s'%v4lconvert.v4lconvert_get_error_message(self.cvt_context) )
-        self._yuv_array = array
 
+        cdef int [:, :, :] carr_view #dummy init for compiler....
+        self.array = array
+        self._yuv_array = np.asarray(<np.uint8_t[:dst_format.fmt.pix.sizeimage]> array)
+        # self._yuv_array = array
+        # PyMem_Free(array)
 
     def clear_caches(self):
         self._bgr_array = None
         self._gray_array = None
         self._yuv_array = None
 
+
+    def __dealloc__(self):
+        pass
+        # if self._yuv_array is not None:
+            # PyMem_Free(self.array)
 
 
 

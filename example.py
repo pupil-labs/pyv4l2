@@ -21,24 +21,24 @@ print 'Will capture at:',cap.transport_format,cap.frame_size,cap.frame_rate
 frame = cap.get_frame()
 
 l = []
-for x in range(1):
+for x in range(30):
 	frame = cap.get_frame()
 	# print frame.width,frame.height
 	# print frame.d
 	y,u,v = frame.yuv
-	bgr = frame.bgr
+	# bgr = frame.bgr
 	# img = frame.bgr
 	# print v.shape
 	# img = frame.gray
 	# y,u,v = img
-	print y.shape
+	# print y.shape
 	cv2.imshow("img",v)
 	# cv2.imshow("u",u)
 	# cv2.imshow("v",v)
-	print "frames"
+	# print "frames"
 	cv2.waitKey(1)
 	# print img
-
+	print 'frame'
 cap.close()
 cap = None
 
