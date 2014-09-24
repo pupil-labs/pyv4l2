@@ -135,7 +135,7 @@ cdef class Frame:
             raise Exception('read only')
         def __get__(self):
             # return gray aka luminace plane of YUV image.
-            if self._yuv_array is None:
+            if self._yuv_converted is False:
                 if self._jpeg_buffer.start != NULL:
                     self.jpeg2yuv()
                 else:

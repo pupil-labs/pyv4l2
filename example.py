@@ -31,8 +31,6 @@ for x in range(30):
 	# print y.data
 	# y = np.ones((1080,1920,1))
 	# print y[].shape
-	print frame.yuv422_buffer
-	print frame.jpeg_buffer
 	# print u[]s.shape
 	cv2.imshow("img",y)
 	# cv2.imshow("u",u)
