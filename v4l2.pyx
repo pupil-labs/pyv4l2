@@ -238,13 +238,13 @@ cdef class Frame:
         result = v4lconvert.v4lconvert_try_format(self.cvt_context,
                                             &dst_format, # in / out
                                             &src_format) # out
-        print dst_format.fmt.pix.sizeimage
-        print dst_format.fmt.pix.bytesperline
+        # print dst_format.fmt.pix.sizeimage
+        # print dst_format.fmt.pix.bytesperline
 
         if result == -1:
             logger.error('v4lconvert jpeg2yuv error: %s'%v4lconvert.v4lconvert_get_error_message(self.cvt_context) )
 
-        cdef np.ndarray[np.uint8_t, ndim=1] array = np.zeros(dst_format.fmt.pix.sizeimage, dtype=np.uint8) #uvc420p size
+        cdef np.ndarray[np.uint8_t, ndim=1] array = np.zeros(dst_format.fmt.pix.sizeimage*2, dtype=np.uint8) #uvc420p size
         result =  v4lconvert.v4lconvert_convert(self.cvt_context, 
                                             &src_format,
                                             &dst_format,
@@ -252,7 +252,7 @@ cdef class Frame:
                                              self._jpeg_buffer.length,
                                              <unsigned char *> array.data,
                                              array.shape[0])
-        print "converted %s"%result
+        # print "converted %s"%result
         if result == -1:
             logger.error('v4lconvert jpeg2yuv error: %s'%v4lconvert.v4lconvert_get_error_message(self.cvt_context) )
         self._yuv_array = array
