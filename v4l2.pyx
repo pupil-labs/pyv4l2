@@ -97,10 +97,6 @@ cdef class Frame:
             planar YUV420 returned in 3 numpy arrays:
             420 subsampling:
                 Y(height,width) U(height/2,width/2), V(height/2,width/2)
-            422 subsampling
-                Y(height,width) U(height,width/2), V(height,width/2)
-            444 subsampling
-                Y(height,width) U(height,width), V(height,width)
             '''
             if self._yuv_array is None:
                 if self._jpeg_buffer.start != NULL:
@@ -114,32 +110,16 @@ cdef class Frame:
             Y = self._yuv_array[:y_plane_len]
             Y.shape = (self.height,self.width)
 
-            if self.yuv_subsampling == turbojpeg.TJSAMP_422:
-                uv_plane_len = y_plane_len/2
-                offset = y_plane_len
-                U = self._yuv_array[offset:offset+uv_plane_len]
-                offset += uv_plane_len
-                V = self._yuv_array[offset:offset+uv_plane_len]
-                U.shape = (self.height,self.width/2)
-                V.shape = (self.height,self.width/2)
-            elif self.yuv_subsampling == turbojpeg.TJSAMP_420:
-                uv_plane_len = y_plane_len/4
-                offset = y_plane_len
-                U = self._yuv_array[offset:offset+uv_plane_len]
-                offset += uv_plane_len
-                V = self._yuv_array[offset:offset+uv_plane_len]
-                U.shape = (self.height/2,self.width/2)
-                V.shape = (self.height/2,self.width/2)
-            elif self.yuv_subsampling == turbojpeg.TJSAMP_444:
-                uv_plane_len = y_plane_len
-                offset = y_plane_len
-                U = self._yuv_array[offset:offset+uv_plane_len]
-                offset += uv_plane_len
-                V = self._yuv_array[offset:offset+uv_plane_len]
-                U.shape = (self.height,self.width)
-                V.shape = (self.height,self.width)
-            else:
-                raise Exception("YUV subsamling other than 420 and 422 is not implemented.")
+            uv_plane_len = y_plane_len/2
+            offset = y_plane_len
+            U = self._yuv_array[offset:offset+uv_plane_len]
+            offset += uv_plane_len
+            V = self._yuv_array[offset:offset+uv_plane_len]
+            U.shape = (self.height,self.width/2)
+            V.shape = (self.height,self.width/2)
+
+            U = U[::2,:]
+            V = V[::2,:]
             return Y,U,V
 
     property gray:      

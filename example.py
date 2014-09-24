@@ -25,13 +25,13 @@ for x in range(300):
 	# print frame.d
 	# y= frame.gray
 	# print v.shape
-	# img = frame.bgr
-	# y,u,v = img
-	# cv2.imshow("img",y)
+	img = frame.yuv
+	y,u,v = img
+	cv2.imshow("img",y)
 	# cv2.imshow("u",u)
 	# cv2.imshow("v",v)
 
-	# cv2.waitKey(1)
+	cv2.waitKey(1)
 	# print img
 cap.close()
 cap = None
