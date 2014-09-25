@@ -19,7 +19,7 @@ cap.frame_size = (1920, 1080)
 cap.frame_rate= (1,30)
 
 print 'Will capture at:',cap.transport_format,cap.frame_size,cap.frame_rate
-for x in range(30):
+for x in range(300):
 	frame = cap.get_frame()
 	# print frame.width,frame.height
 	# print frame.d
@@ -27,7 +27,7 @@ for x in range(30):
 	# print v.shape
 	img = frame.yuv
 	y,u,v = img
-	y = frame.bgr
+	# y = frame.bgr
 	# print y.data
 	# y = np.ones((1080,1920,1))
 	# print y[].shape

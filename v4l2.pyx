@@ -8,7 +8,6 @@ cimport cmman as mman
 cimport cselect as select
 cimport cv4l2 as v4l2
 cimport cturbojpeg as turbojpeg
-# cimport cv4lconvert as v4lconvert
 cimport numpy as np
 import numpy as np
 
@@ -72,8 +71,8 @@ cdef class Frame:
 
 
     property jpeg_buffer:
-        def __set__(self,buffer_handle new_buffer):
-            self._jpeg_buffer = new_buffer
+        def __set__(self,buffer_handle buffer):
+            self._jpeg_buffer = buffer
 
         def __get__(self):
             #retuns buffer handle to jpeg buffer
@@ -83,7 +82,7 @@ cdef class Frame:
 
 
     property yuv422_buffer:
-        def __set__(self,buffer_handle new_buffer):
+        def __set__(self,buffer_handle buffer):
             raise Exception('Read only')
 
         def __get__(self):
@@ -93,6 +92,8 @@ cdef class Frame:
                     self.jpeg2yuv()
                 else:
                     raise Exception("No source image data found to convert from.")
+            if self.yuv_subsampling != turbojpeg.TJSAMP_422:
+                raise Exception('YUV buffer avaible but not in yuv422.')
             cdef buffer_handle buf = buffer_handle()
             buf.start = <void*>(&self._yuv_buffer[0])
             buf.length = self._yuv_buffer.shape[0]
@@ -118,16 +119,30 @@ cdef class Frame:
             y_plane_len = self.width*self.height
             Y = np.asarray(self._yuv_buffer[:y_plane_len]).reshape(self.height,self.width)
 
-            uv_plane_len = y_plane_len/2
-            offset = y_plane_len
-            U = np.asarray(self._yuv_buffer[offset:offset+uv_plane_len]).reshape(self.height,self.width/2)
-            offset += uv_plane_len
-            V = np.asarray(self._yuv_buffer[offset:offset+uv_plane_len]).reshape(self.height,self.width/2)
-
-
-            #hack solution to go from YUV422 to YUV420
-            U = U[::2,:]
-            V = V[::2,:]
+            if self.yuv_subsampling == turbojpeg.TJSAMP_422:
+                uv_plane_len = y_plane_len/2
+                offset = y_plane_len
+                U = np.asarray(self._yuv_buffer[offset:offset+uv_plane_len]).reshape(self.height,self.width/2)
+                offset += uv_plane_len
+                V = np.asarray(self._yuv_buffer[offset:offset+uv_plane_len]).reshape(self.height,self.width/2)
+                #hack solution to go from YUV422 to YUV420
+                U = U[::2,:]
+                V = V[::2,:]
+            elif self.yuv_subsampling == turbojpeg.TJSAMP_420:
+                uv_plane_len = y_plane_len/4
+                offset = y_plane_len
+                U = np.asarray(self._yuv_buffer[offset:offset+uv_plane_len]).reshape(self.height/2,self.width/2)
+                offset += uv_plane_len
+                V = np.asarray(self._yuv_buffer[offset:offset+uv_plane_len]).reshape(self.height/2,self.width/2)
+            elif self.yuv_subsampling == turbojpeg.TJSAMP_444:
+                uv_plane_len = y_plane_len
+                offset = y_plane_len
+                U = np.asarray(self._yuv_buffer[offset:offset+uv_plane_len]).reshape(self.height,self.width)
+                offset += uv_plane_len
+                V = np.asarray(self._yuv_buffer[offset:offset+uv_plane_len]).reshape(self.height,self.width)
+                #hack solution to go from YUV444 to YUV420
+                U = U[::2,::2]
+                V = V[::2,::2]
             return Y,U,V
 
     property gray:      
@@ -174,7 +189,7 @@ cdef class Frame:
         cdef int channels = 3
         cdef int result
         self._bgr_buffer = np.empty(self.width*self.height*channels, dtype=np.uint8)
-        result = turbojpeg.tjDecodeYUV(self.tj_context, &self._yuv_buffer[0], 4, turbojpeg.TJSAMP_422, 
+        result = turbojpeg.tjDecodeYUV(self.tj_context, &self._yuv_buffer[0], 4, self.yuv_subsampling, 
                                         &self._bgr_buffer[0], self.width, 0, self.height, turbojpeg.TJPF_BGR, 0)
         if result == -1:
             logger.error('Turbojpeg yuv2bgr error: %s'%turbojpeg.tjGetErrorStr() )
@@ -203,6 +218,7 @@ cdef class Frame:
             logger.error('Turbojpeg jpeg2yuv error: %s'%turbojpeg.tjGetErrorStr() )
         self.yuv_subsampling = jpegSubsamp
         self._yuv_converted = True
+
     # cdef jpeg2bgr(self):
     #     #10.66ms on 1080p
     #     cdef int channels = 3
@@ -315,7 +331,6 @@ cdef class Capture:
             self.close()
 
     def get_frame(self):
-        cdef Frame out_frame
         if not self._camera_streaming:
             self.init_buffers()
             self.start()
@@ -349,20 +364,21 @@ cdef class Capture:
 
         #now we hold a valid frame
         # print self._active_buffer.timestamp.tv_sec,',',self._active_buffer.timestamp.tv_usec,self._active_buffer.bytesused,self._active_buffer.index
-        out_frame = Frame()
+        cdef Frame out_frame = Frame()
         out_frame.tj_context = self.tj_context
         out_frame.timestamp = <double>self._active_buffer.timestamp.tv_sec + <double>self._active_buffer.timestamp.tv_usec / 10e6
         out_frame.width,out_frame.height = self._frame_size
         
-        cdef buffer_handle new_buf = buffer_handle()
-        new_buf.start = (<buffer_handle>self.buffers[self._active_buffer.index]).start
-        new_buf.length = self._active_buffer.bytesused
+        cdef buffer_handle buf = buffer_handle()
+        buf.start = (<buffer_handle>self.buffers[self._active_buffer.index]).start
+        buf.length = self._active_buffer.bytesused
 
 
         if self._transport_format == v4l2.V4L2_PIX_FMT_MJPEG:
-            out_frame.jpeg_buffer  = new_buf
+            out_frame.jpeg_buffer  = buf
         elif self._transport_format == v4l2.V4L2_PIX_FMT_YUYV:
-            out_frame._yuyv_buffer = new_buf
+            raise Exception("Reading Transport format YUYV is not implemented")
+            # out_frame._yuyv_buffer = buf
         else:
             raise Exception("Reading Tranport format data '%s' is not implemented."%self.transport_format)
         return out_frame
@@ -672,3 +688,35 @@ cdef class Capture:
             self.deinit_buffers()
             self.set_format()
             self.get_format()
+
+
+
+
+    def enum_controls(self):
+        cdef v4l2.v4l2_queryctrl queryctrl
+        # memset(&queryctrl, 0, sizeof(queryctrl));
+        queryctrl.id = v4l2.V4L2_CTRL_CLASS_USER | v4l2.V4L2_CTRL_FLAG_NEXT_CTRL
+        while (0 == self.xioctl(v4l2.VIDIOC_QUERYCTRL, &queryctrl)):
+            if v4l2.V4L2_CTRL_ID2CLASS(queryctrl.id) != v4l2.V4L2_CTRL_CLASS_USER:
+                break
+            if queryctrl.flags & v4l2.V4L2_CTRL_FLAG_DISABLED:
+                pass
+            else:
+                print"Control %s"%queryctrl.name
+                if queryctrl.type == v4l2.V4L2_CTRL_TYPE_MENU:
+                    self.enumerate_menu()
+                queryctrl.id |= v4l2.V4L2_CTRL_FLAG_NEXT_CTRL
+
+        if errno != EINVAL:
+            raise Exception("VIDIOC_QUERYCTRL")
+
+    def enumerate_menu(self,v4l2.v4l2_queryctrl queryctrl):
+        cdef v4l2.v4l2_querymenu querymenu
+        print "  Menu items:"
+        # memset(&querymenu, 0, sizeof(querymenu));
+        querymenu.id = queryctrl.id
+        querymenu.index = queryctrl.minimum
+        while querymenu.index <= queryctrl.maximum:
+            if 0 == self.xioctl(v4l2.VIDIOC_QUERYMENU, &querymenu):
+                print "  %s"%querymenu.name
+            querymenu.index +=1
