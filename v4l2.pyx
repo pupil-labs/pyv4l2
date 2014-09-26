@@ -2,7 +2,7 @@ import cython
 
 from posix cimport fcntl,unistd, stat, time
 from posix.ioctl cimport ioctl
-from libc.errno cimport errno,EINTR,EINVAL,EAGAIN,EIO
+from libc.errno cimport errno,EINTR,EINVAL,EAGAIN,EIO,ERANGE
 from libc.string cimport strerror
 cimport cmman as mman
 cimport cselect as select
@@ -697,20 +697,23 @@ cdef class Capture:
         # memset(&queryctrl, 0, sizeof(queryctrl));
         queryctrl.id = v4l2.V4L2_CTRL_CLASS_USER | v4l2.V4L2_CTRL_FLAG_NEXT_CTRL
         while (0 == self.xioctl(v4l2.VIDIOC_QUERYCTRL, &queryctrl)):
-            if v4l2.V4L2_CTRL_ID2CLASS(queryctrl.id) != v4l2.V4L2_CTRL_CLASS_USER:
-                break
-            if queryctrl.flags & v4l2.V4L2_CTRL_FLAG_DISABLED:
+            if v4l2.V4L2_CTRL_ID2CLASS(queryctrl.id) != v4l2.V4L2_CTRL_CLASS_CAMERA:
+                pass
+            if queryctrl.flags & v4l2.V4L2_CTRL_FLAG_DISABLED and 0:
                 pass
             else:
                 print"Control %s"%queryctrl.name
+                print "type",queryctrl.type
+                print "id",queryctrl.id
                 if queryctrl.type == v4l2.V4L2_CTRL_TYPE_MENU:
-                    self.enumerate_menu()
+                    self.enumerate_menu(queryctrl)
                 queryctrl.id |= v4l2.V4L2_CTRL_FLAG_NEXT_CTRL
 
         if errno != EINVAL:
-            raise Exception("VIDIOC_QUERYCTRL")
+            logger.error("VIDIOC_QUERYCTRL")
+            # raise Exception("VIDIOC_QUERYCTRL")
 
-    def enumerate_menu(self,v4l2.v4l2_queryctrl queryctrl):
+    cdef enumerate_menu(self,v4l2.v4l2_queryctrl queryctrl):
         cdef v4l2.v4l2_querymenu querymenu
         print "  Menu items:"
         # memset(&querymenu, 0, sizeof(querymenu));
@@ -720,3 +723,24 @@ cdef class Capture:
             if 0 == self.xioctl(v4l2.VIDIOC_QUERYMENU, &querymenu):
                 print "  %s"%querymenu.name
             querymenu.index +=1
+
+
+    cpdef set_control(self, int control_id,value):
+        cdef v4l2.v4l2_control control
+        control.id = control_id
+        control.value = value
+        if self.xioctl(v4l2.VIDIOC_S_CTRL, &control) ==-1:
+            if errno == ERANGE:
+                logger.debug("Control out of range")
+            else:
+                logger.error("Could not set control")
+
+    cpdef get_control(self, int control_id):
+        cdef v4l2.v4l2_control control
+        control.id = control_id
+        if self.xioctl(v4l2.VIDIOC_G_CTRL, &control) ==-1:
+            if errno == EINVAL:
+                logger.debug("Control is not supported")
+            else:
+                logger.error("Could not set control")
+        return control.value

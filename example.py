@@ -12,14 +12,16 @@ import numpy as np
 cap = v4l2.Capture("/dev/video0")
 # cap.transport_formats
 # print cap.frame_rate 
-# print cap.frame_size 
+# print cap.frame_size b
 # print cap.transport_format,cap.transport_formats
 
-cap.frame_size = (1920, 1080)
+cap.frame_size = (800, 600)
 cap.frame_rate= (1,30)
-
+cap.enum_controls()
+cap.set_control(9963776,120)
+print cap.get_control(9963776)
 print 'Will capture at:',cap.transport_format,cap.frame_size,cap.frame_rate
-for x in range(300):
+for x in range(0):
 	frame = cap.get_frame()
 	# print frame.width,frame.height
 	# print frame.d

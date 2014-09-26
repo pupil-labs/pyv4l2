@@ -548,6 +548,16 @@ cdef extern from  "linux/videodev2.h":
         __u32 reserved[2]
         v4l2_ext_control *controls
 
+    enum: V4L2_CTRL_CLASS_USER
+    enum: V4L2_CTRL_CLASS_MPEG
+    enum: V4L2_CTRL_CLASS_CAMERA 
+    enum: V4L2_CTRL_CLASS_FM_TX
+    enum: V4L2_CTRL_CLASS_FLASH
+
+    enum: V4L2_CTRL_ID_MASK         
+    const int V4L2_CTRL_ID2CLASS(int id)  
+    const int V4L2_CTRL_DRIVER_PRIV(int id) 
+
     cdef enum v4l2_ctrl_type:
         V4L2_CTRL_TYPE_INTEGER
         V4L2_CTRL_TYPE_BOOLEAN
@@ -857,7 +867,15 @@ cdef extern from  "linux/videodev2.h":
         V4L2_EXPOSURE_APERTURE_PRIORITY
 
 
-
+    enum: V4L2_CTRL_FLAG_DISABLED
+    enum: V4L2_CTRL_FLAG_GRABBED
+    enum: V4L2_CTRL_FLAG_READ_ONLY
+    enum: V4L2_CTRL_FLAG_UPDATE
+    enum: V4L2_CTRL_FLAG_INACTIVE
+    enum: V4L2_CTRL_FLAG_SLIDER
+    enum: V4L2_CTRL_FLAG_WRITE_ONLY
+    enum: V4L2_CTRL_FLAG_VOLATILE
+    enum: V4L2_CTRL_FLAG_NEXT_CTRL
 
 
     enum: V4L2_CID_MAX_CTRLS
