@@ -34,6 +34,7 @@ for x in range(200):
 	try:
 		frame = cap.get_frame()
 	except: 
+		print "could not grab frame"
 		break
 	# print frame.width,frame.height
 	# print frame.d
