@@ -378,7 +378,7 @@ cdef class Capture:
 
             elif errno == EIO:
                 # Can ignore EIO, see spec. 
-                pass # fall through 
+                pass
             else:
                 raise Exception("VIDIOC_DQBUF")
 
@@ -422,7 +422,7 @@ cdef class Capture:
         while True:
             select.FD_ZERO(&fds)
             select.FD_SET(self.dev_handle, &fds)
-            tv.tv_sec = 3
+            tv.tv_sec = 2
             tv.tv_usec = 0
 
             r = select.select(self.dev_handle + 1, &fds, NULL, NULL, &tv)
