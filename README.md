@@ -33,11 +33,16 @@ Needs to be build with fpic!
 Will be installed to `/opt/libjpeg-turbo`.
 
 ```
-wget latest source
-unzip source_dir
-cd source_dir
+wget -O libjpeg-turbo-1.3.90.tar.gz http://sourceforge.net/projects/libjpeg-turbo/files/1.3.90%20%281.4%20beta1%29/libjpeg-turbo-1.3.90.tar.gz/download
+tar xvzf libjpeg-turbo-1.3.90.tar.gz
+cd libjpeg-turbo-1.3.90
 ./configure --with-pic
 sudo make install
+```
+
+###dependecy cython
+```
+sudo pip cython
 ```
 
 ## just build locally
