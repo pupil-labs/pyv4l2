@@ -42,7 +42,7 @@ sudo make install
 
 ###dependecy cython
 ```
-sudo pip install git+https://github.com/cython/cython.git
+sudo pip cython
 ```
 
 ## just build locally
