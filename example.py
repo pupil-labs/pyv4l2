@@ -9,19 +9,23 @@ import numpy as np
 
 
 
+
+
 cap = v4l2.Capture("/dev/video0")
+print cap.get_info()
 # cap.transport_formats
 # print cap.frame_rate 
 # print cap.frame_size b
 # print cap.transport_format,cap.transport_formats
 
-cap.frame_size = (800, 600)
+print v4l2.list_devices()
+cap.frame_size = (1920, 1080)
 cap.frame_rate= (1,30)
-cap.enum_controls()
-cap.set_control(9963776,120)
-print cap.get_control(9963776)
+controls =  cap.enum_controls()
+cap.set_control(controls[0]['id'],controls[0]['default'])
+print cap.get_control(controls[0]['id'])
 print 'Will capture at:',cap.transport_format,cap.frame_size,cap.frame_rate
-for x in range(0):
+for x in range(1000):
 	frame = cap.get_frame()
 	# print frame.width,frame.height
 	# print frame.d
@@ -43,9 +47,3 @@ for x in range(0):
 cap.close()
 cap = None
 
-
-import numpy as np
-
-d = np.ones((1920,1080))
-print d.shape
-print d[::2,:].shape

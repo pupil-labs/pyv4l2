@@ -12,6 +12,9 @@ cimport numpy as np
 import numpy as np
 
 
+from os import listdir as oslistdir
+
+
 #logging
 import logging
 logger = logging.getLogger(__name__)
@@ -330,6 +333,13 @@ cdef class Capture:
         if self.dev_handle != -1:
             self.close()
 
+    def get_info(self):
+        cdef v4l2.v4l2_capability caps
+        if self.xioctl(v4l2.VIDIOC_QUERYCAP,&caps) !=0:
+            raise Exception("VIDIOC_QUERYCAP error. Could not get devices info.")
+
+        return  self.dev_name, caps.driver, caps.card, caps.bus_info
+
     def get_frame(self):
         if not self._camera_streaming:
             self.init_buffers()
@@ -580,8 +590,6 @@ cdef class Capture:
             self._frame_rate = streamparm.parm.capture.timeperframe.numerator,streamparm.parm.capture.timeperframe.denominator
 
 
-
-
     property transport_formats:
         def __get__(self):
             cdef v4l2.v4l2_fmtdesc fmt
@@ -694,35 +702,52 @@ cdef class Capture:
 
     def enum_controls(self):
         cdef v4l2.v4l2_queryctrl queryctrl
-        # memset(&queryctrl, 0, sizeof(queryctrl));
         queryctrl.id = v4l2.V4L2_CTRL_CLASS_USER | v4l2.V4L2_CTRL_FLAG_NEXT_CTRL
+        controls = []
+        control_type = {v4l2.V4L2_CTRL_TYPE_INTEGER:'int',
+                        v4l2.V4L2_CTRL_TYPE_BOOLEAN:'bool',
+                        v4l2.V4L2_CTRL_TYPE_MENU:'menu'}
+
         while (0 == self.xioctl(v4l2.VIDIOC_QUERYCTRL, &queryctrl)):
+
             if v4l2.V4L2_CTRL_ID2CLASS(queryctrl.id) != v4l2.V4L2_CTRL_CLASS_CAMERA:
+                #we ignore this conditon
                 pass
-            if queryctrl.flags & v4l2.V4L2_CTRL_FLAG_DISABLED and 0:
-                pass
+            control = {}  
+            control['name'] = queryctrl.name
+            control['type'] = control_type[queryctrl.type]
+            control['id'] = queryctrl.id
+            control['min'] = queryctrl.minimum
+            control['max'] = queryctrl.maximum
+            control['step'] = queryctrl.step
+            control['default'] = queryctrl.default_value
+            if queryctrl.flags & v4l2.V4L2_CTRL_FLAG_DISABLED:
+                control['disabled'] = True
             else:
-                print"Control %s"%queryctrl.name
-                print "type",queryctrl.type
-                print "id",queryctrl.id
+                control['disabled'] = False
+
                 if queryctrl.type == v4l2.V4L2_CTRL_TYPE_MENU:
-                    self.enumerate_menu(queryctrl)
-                queryctrl.id |= v4l2.V4L2_CTRL_FLAG_NEXT_CTRL
+                    control['menu'] = self.enumerate_menu(queryctrl)
+
+            controls.append(control)
+
+            queryctrl.id |= v4l2.V4L2_CTRL_FLAG_NEXT_CTRL
 
         if errno != EINVAL:
             logger.error("VIDIOC_QUERYCTRL")
             # raise Exception("VIDIOC_QUERYCTRL")
+        return controls
 
     cdef enumerate_menu(self,v4l2.v4l2_queryctrl queryctrl):
         cdef v4l2.v4l2_querymenu querymenu
-        print "  Menu items:"
-        # memset(&querymenu, 0, sizeof(querymenu));
         querymenu.id = queryctrl.id
         querymenu.index = queryctrl.minimum
+        menu = {}
         while querymenu.index <= queryctrl.maximum:
             if 0 == self.xioctl(v4l2.VIDIOC_QUERYMENU, &querymenu):
-                print "  %s"%querymenu.name
+                menu[querymenu.name] = querymenu.index
             querymenu.index +=1
+        return menu
 
 
     cpdef set_control(self, int control_id,value):
@@ -744,3 +769,84 @@ cdef class Capture:
             else:
                 logger.error("Could not set control")
         return control.value
+
+
+
+
+
+###Utiliy functions
+
+def list_devices():
+    file_names = [x for x in oslistdir("/dev") if x.startswith("video")]
+    file_names.sort()
+    devices = []
+    for file_name in file_names:
+        path = "/dev/" + file_name
+        try:
+            cap = Cap_Info(path)
+            devices.append(cap.get_info())
+            cap.close()
+        except IOError:
+            logger.error("Could not get device info for %s"%path)
+    return devices
+
+
+
+
+cdef class Cap_Info:
+    """
+    Video Capture class used to make device list.
+    
+    """
+    cdef int dev_handle 
+    cdef char *dev_name
+
+    def __cinit__(self,char *dev_name):
+        pass
+
+    def __init__(self,char *dev_name):
+        self.dev_name = dev_name
+        self.dev_handle = self.open_device()
+
+
+    def close(self):
+        self.close_device()
+
+    def __dealloc__(self):
+        if self.dev_handle != -1:
+            self.close()
+
+    def get_info(self):
+        cdef v4l2.v4l2_capability caps
+        if self.xioctl(v4l2.VIDIOC_QUERYCAP,&caps) !=0:
+            raise Exception("VIDIOC_QUERYCAP error. Could not get devices info.")
+
+        return self.dev_name, caps.driver, caps.card, caps.bus_info
+
+    cdef xioctl(self, int request, void *arg):
+        cdef int r
+        while True:
+            r = ioctl(self.dev_handle, request, arg)
+            if -1 != r or EINTR != errno:
+                break
+        return r
+
+    cdef open_device(self):
+        cdef stat.struct_stat st
+        cdef int dev_handle = -1
+        if -1 == stat.stat(self.dev_name, &st):
+            raise Exception("Cannot find '%s'. Error: %d, %s\n"%(self.dev_name, errno, strerror(errno) ))
+        if not stat.S_ISCHR(st.st_mode):
+            raise Exception("%s is no device\n"%self.dev_name)
+
+        dev_handle = fcntl.open(self.dev_name, fcntl.O_RDWR | fcntl.O_NONBLOCK, 0)
+        if -1 == dev_handle:
+            raise Exception("Cannot open '%s'. Error: %d, %s\n"%(self.dev_name, errno, strerror(errno) ))
+        return dev_handle
+
+
+    cdef close_device(self):
+        if unistd.close(self.dev_handle) == -1:
+            raise Exception("Could not close device. Handle: '%s'. Error: %d, %s\n"%(self.dev_handle, errno, strerror(errno) ))
+        self.dev_handle = -1
+
