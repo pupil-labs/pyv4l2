@@ -30,7 +30,7 @@ print controls
 cap.set_control(controls[0]['id'],controls[0]['default'])
 print cap.get_control(controls[0]['id'])
 print 'Will capture at:',cap.transport_format,cap.frame_size,cap.frame_rate
-for x in range(20):
+for x in range(200):
 	frame = cap.get_frame()
 	# print frame.width,frame.height
 	# print frame.d
