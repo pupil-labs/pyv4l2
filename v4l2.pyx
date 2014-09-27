@@ -330,9 +330,12 @@ cdef class Capture:
 
 
     def close(self):
-        self.stop()
-        self.deinit_buffers()
-        self.close_device()
+        try:
+            self.stop()
+            self.deinit_buffers()
+            self.close_device()
+        except:
+            logger.warning("Could not shut down Capture properly.")
 
     def __dealloc__(self):
         turbojpeg.tjDestroy(self.tj_context)
@@ -474,7 +477,7 @@ cdef class Capture:
         if self._camera_streaming:
             buf_type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
             if self.xioctl(v4l2.VIDIOC_STREAMOFF,&buf_type) == -1:
-                self.close()
+                self.close_device()
                 raise Exception("Could not deinit buffers.")
 
             self._camera_streaming = False
@@ -575,7 +578,7 @@ cdef class Capture:
         streamparm.parm.capture.timeperframe.numerator = self.frame_rate[0]
         streamparm.parm.capture.timeperframe.denominator = self.frame_rate[1]
         if self.xioctl(v4l2.VIDIOC_S_PARM, &streamparm) == -1:
-            self._close()
+            self.close()
             raise Exception("Could not set v4l2 parameters")
        
 
@@ -593,7 +596,7 @@ cdef class Capture:
         cdef v4l2.v4l2_streamparm streamparm
         streamparm.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
         if self.xioctl(v4l2.VIDIOC_G_PARM, &streamparm) == -1:
-            self._close()
+            self.close()
             raise Exception("Could not get v4l2 parameters")
         else:
             self._frame_rate = streamparm.parm.capture.timeperframe.numerator,streamparm.parm.capture.timeperframe.denominator
