@@ -211,14 +211,20 @@ cdef class Frame:
         cdef int channels = 1
         cdef int jpegSubsamp, j_width,j_height
         cdef int result
-
-        turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, 
+        cdef long unsigned int buf_size
+        result = turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>self._jpeg_buffer.start, 
                                         self._jpeg_buffer.length, 
                                         &j_width, &j_height, &jpegSubsamp)
 
-        self._yuv_buffer = np.empty(turbojpeg.tjBufSizeYUV2(j_width,2, j_height, jpegSubsamp), dtype=np.uint8)
+        if result == -1:
+            logger.error('Turbojpeg could not read jpeg header: %s'%turbojpeg.tjGetErrorStr() )
+            # hacky creation of dummy data, this will break if capture does work with different subsampling:
+            j_width, j_height, jpegSubsamp = self.width, self.height, turbojpeg.TJSAMP_422
 
-        result =  turbojpeg.tjDecompressToYUV(self.tj_context, 
+        buf_size = turbojpeg.tjBufSizeYUV(j_width, j_height, jpegSubsamp)
+        self._yuv_buffer = np.empty(buf_size, dtype=np.uint8)
+        if result !=-1:
+            result =  turbojpeg.tjDecompressToYUV(self.tj_context, 
                                              <unsigned char *>self._jpeg_buffer.start, 
                                              self._jpeg_buffer.length,
                                              &self._yuv_buffer[0],
@@ -277,7 +283,7 @@ cdef class Capture:
     All controls are exposed and can be enumerated using the controls list.
     """
     cdef int dev_handle 
-    cdef char *dev_name
+    cdef bytes dev_name
     cdef bint _camera_streaming, _buffers_initialized
     cdef object _transport_formats, _frame_rates,_frame_sizes
     cdef object  _frame_rate, _frame_size # (rate_num,rate_den), (width,height)
@@ -290,10 +296,10 @@ cdef class Capture:
 
     cdef turbojpeg.tjhandle tj_context
 
-    def __cinit__(self,char *dev_name):
+    def __cinit__(self,dev_name):
         pass
 
-    def __init__(self,char *dev_name):
+    def __init__(self,dev_name):
         self.dev_name = dev_name
         self.dev_handle = self.open_device()
         self.verify_device()
@@ -338,7 +344,18 @@ cdef class Capture:
 
         return  {'dev_path':self.dev_name,'driver':caps.driver,'dev_name':caps.card,'bus_info':caps.bus_info}
 
+    def get_frame_robust(self, int attemps = 6):
+        for a in range(attemps)[::-1]:
+            try:
+                frame = self.get_frame()
+            except:
+                logger.debug('Could not get Frame on "%s". Trying %s more times.'%(self.dev_name,a))
+            else: 
+                return frame
+        raise Exception("Could not grab frame from %s"%self.dev_name)
+
     def get_frame(self):
+        cdef int j_width,j_height,jpegSubsamp,header_ok
         if not self._camera_streaming:
             self.init_buffers()
             self.start()
@@ -383,7 +400,13 @@ cdef class Capture:
 
 
         if self._transport_format == v4l2.V4L2_PIX_FMT_MJPEG:
-            out_frame.jpeg_buffer  = buf
+            ##check jpeg header
+            header_ok = turbojpeg.tjDecompressHeader2(self.tj_context,  <unsigned char *>buf.start, buf.length, &j_width, &j_height, &jpegSubsamp)
+            if header_ok >=0 and out_frame.width == j_width and out_frame.height == out_frame.height:
+                out_frame.jpeg_buffer  = buf
+            else:
+                raise Exception("JPEG header corrupted.")
+
         elif self._transport_format == v4l2.V4L2_PIX_FMT_YUYV:
             raise Exception("Reading Transport format YUYV is not implemented")
             # out_frame._yuyv_buffer = buf
@@ -427,12 +450,12 @@ cdef class Capture:
     cdef open_device(self):
         cdef stat.struct_stat st
         cdef int dev_handle = -1
-        if -1 == stat.stat(self.dev_name, &st):
+        if -1 == stat.stat(<char *>self.dev_name, &st):
             raise Exception("Cannot find '%s'. Error: %d, %s\n"%(self.dev_name, errno, strerror(errno) ))
         if not stat.S_ISCHR(st.st_mode):
             raise Exception("%s is no device\n"%self.dev_name)
 
-        dev_handle = fcntl.open(self.dev_name, fcntl.O_RDWR | fcntl.O_NONBLOCK, 0)
+        dev_handle = fcntl.open(<char *>self.dev_name, fcntl.O_RDWR | fcntl.O_NONBLOCK, 0)
         if -1 == dev_handle:
             raise Exception("Cannot open '%s'. Error: %d, %s\n"%(self.dev_name, errno, strerror(errno) ))
         return dev_handle
@@ -804,12 +827,12 @@ cdef class Cap_Info:
     
     """
     cdef int dev_handle 
-    cdef char *dev_name
+    cdef bytes dev_name
 
-    def __cinit__(self,char *dev_name):
+    def __cinit__(self,dev_name):
         pass
 
-    def __init__(self,char *dev_name):
+    def __init__(self,dev_name):
         self.dev_name = dev_name
         self.dev_handle = self.open_device()
 
@@ -839,12 +862,12 @@ cdef class Cap_Info:
     cdef open_device(self):
         cdef stat.struct_stat st
         cdef int dev_handle = -1
-        if -1 == stat.stat(self.dev_name, &st):
+        if -1 == stat.stat(<char *>self.dev_name, &st):
             raise Exception("Cannot find '%s'. Error: %d, %s\n"%(self.dev_name, errno, strerror(errno) ))
         if not stat.S_ISCHR(st.st_mode):
             raise Exception("%s is no device\n"%self.dev_name)
 
-        dev_handle = fcntl.open(self.dev_name, fcntl.O_RDWR | fcntl.O_NONBLOCK, 0)
+        dev_handle = fcntl.open(<char *>self.dev_name, fcntl.O_RDWR | fcntl.O_NONBLOCK, 0)
         if -1 == dev_handle:
             raise Exception("Cannot open '%s'. Error: %d, %s\n"%(self.dev_name, errno, strerror(errno) ))
         return dev_handle

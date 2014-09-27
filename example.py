@@ -32,8 +32,8 @@ print cap.get_control(controls[0]['id'])
 print 'Will capture at:',cap.transport_format,cap.frame_size,cap.frame_rate
 for x in range(200):
 	try:
-		frame = cap.get_frame()
-	except: 
+		frame = cap.get_frame_robust()
+	except IOError: 
 		print "could not grab frame"
 		break
 	# print frame.width,frame.height
