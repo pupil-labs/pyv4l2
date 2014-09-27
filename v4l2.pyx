@@ -338,7 +338,7 @@ cdef class Capture:
         if self.xioctl(v4l2.VIDIOC_QUERYCAP,&caps) !=0:
             raise Exception("VIDIOC_QUERYCAP error. Could not get devices info.")
 
-        return  self.dev_name, caps.driver, caps.card, caps.bus_info
+        return  {'dev_path':self.dev_name,'driver':caps.driver,'dev_name':caps.card,'bus_info':caps.bus_info}
 
     def get_frame(self):
         if not self._camera_streaming:
@@ -821,7 +821,7 @@ cdef class Cap_Info:
         if self.xioctl(v4l2.VIDIOC_QUERYCAP,&caps) !=0:
             raise Exception("VIDIOC_QUERYCAP error. Could not get devices info.")
 
-        return self.dev_name, caps.driver, caps.card, caps.bus_info
+        return {'dev_path':self.dev_name,'driver':caps.driver,'dev_name':caps.card,'bus_info':caps.bus_info}
 
     cdef xioctl(self, int request, void *arg):
         cdef int r
