@@ -310,18 +310,6 @@ cdef class Capture:
         self._buffers_initialized = False
         self._camera_streaming = False
 
-        # if timebase == None:
-        #     logger.debug("Capture will run with default system timebase")
-        #     self.timebase = c_double(0)
-        # elif isinstance(timebase,c_double):
-        #     logger.debug("Capture will run with app wide adjustable timebase")
-        #     self.timebase = timebase
-        # else:
-        #     logger.error("Invalid timebase variable type. Will use default system timebase")
-        #     self.timebase = c_double(0)
-        #self._use_hw_timestamps = use_hw_timestamps
-        #
-        #
         #setup for jpeg converter
         self.tj_context = turbojpeg.tjInitDecompress()
 
