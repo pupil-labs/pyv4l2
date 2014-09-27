@@ -19,6 +19,12 @@ from os import listdir as oslistdir
 import logging
 logger = logging.getLogger(__name__)
 
+
+def get_sys_time_monotonic():
+    cdef time.timespec t
+    time.clock_gettime(time.CLOCK_MONOTONIC, &t)
+    return t.tv_sec + <double>t.tv_nsec * 1e-9
+
 def fourcc_string(i):
     s = chr(i & 255)
     for shift in (8,16,24):
@@ -292,6 +298,7 @@ cdef class Capture:
         self.dev_handle = self.open_device()
         self.verify_device()
         self.get_format()
+        self.get_streamparm()
 
         self._transport_formats = None
         self._frame_rates = None
@@ -441,9 +448,10 @@ cdef class Capture:
 
 
     cdef close_device(self):
-        if unistd.close(self.dev_handle) == -1:
-            raise Exception("Could not close device. Handle: '%s'. Error: %d, %s\n"%(self.dev_handle, errno, strerror(errno) ))
-        self.dev_handle = -1
+        if not self.dev_handle == -1:
+            if unistd.close(self.dev_handle) == -1:
+                raise Exception("Could not close device. Handle: '%s'. Error: %d, %s\n"%(self.dev_handle, errno, strerror(errno) ))
+            self.dev_handle = -1
 
 
     cdef verify_device(self):
@@ -544,7 +552,7 @@ cdef class Capture:
             self.buffers = []
             self._buffers_initialized = False
             self._allocated_buf_n = 0
-
+            self._buffer_active = False
             logger.debug("Buffers deinitialized")
 
 
@@ -561,7 +569,7 @@ cdef class Capture:
             self.close()
             raise Exception("Could not set v4l2 format")
 
-
+    cdef set_streamparm(self):
         cdef v4l2.v4l2_streamparm streamparm
         streamparm.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
         streamparm.parm.capture.timeperframe.numerator = self.frame_rate[0]
@@ -581,6 +589,7 @@ cdef class Capture:
             self._frame_size = format.fmt.pix.width,format.fmt.pix.height
             self._transport_format = format.fmt.pix.pixelformat
 
+    cdef get_streamparm(self):
         cdef v4l2.v4l2_streamparm streamparm
         streamparm.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
         if self.xioctl(v4l2.VIDIOC_G_PARM, &streamparm) == -1:
@@ -672,6 +681,8 @@ cdef class Capture:
             self.deinit_buffers()
             self.set_format()
             self.get_format()
+            self.set_streamparm()
+            self.get_streamparm()
             self._frame_sizes = None
             self._frame_rates = None
 
@@ -686,6 +697,8 @@ cdef class Capture:
             self.deinit_buffers()
             self.set_format()
             self.get_format()
+            self.set_streamparm()
+            self.get_streamparm()
 
     property frame_rate:
         def __get__(self):
@@ -694,8 +707,8 @@ cdef class Capture:
             self._frame_rate = val
             self.stop()
             self.deinit_buffers()
-            self.set_format()
-            self.get_format()
+            self.set_streamparm()
+            self.get_streamparm()
 
 
 
@@ -721,6 +734,7 @@ cdef class Capture:
             control['max'] = queryctrl.maximum
             control['step'] = queryctrl.step
             control['default'] = queryctrl.default_value
+            control['value'] = self.get_control(queryctrl.id)
             if queryctrl.flags & v4l2.V4L2_CTRL_FLAG_DISABLED:
                 control['disabled'] = True
             else:

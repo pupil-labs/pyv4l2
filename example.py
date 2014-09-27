@@ -16,7 +16,6 @@ if v4l2.list_devices() ==[]:
 
 print v4l2.list_devices()
 
-
 cap = v4l2.Capture("/dev/video0")
 print cap.get_info()
 # cap.transport_formats
@@ -27,10 +26,11 @@ print cap.get_info()
 cap.frame_size = (1920, 1080)
 cap.frame_rate= (1,30)
 controls =  cap.enum_controls()
+print controls
 cap.set_control(controls[0]['id'],controls[0]['default'])
 print cap.get_control(controls[0]['id'])
 print 'Will capture at:',cap.transport_format,cap.frame_size,cap.frame_rate
-for x in range(200):
+for x in range(20):
 	frame = cap.get_frame()
 	# print frame.width,frame.height
 	# print frame.d
