@@ -20,19 +20,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def get_sys_time_monotonic():
-    cdef time.timespec t
-    time.clock_gettime(time.CLOCK_MONOTONIC, &t)
-    return t.tv_sec + <double>t.tv_nsec * 1e-9
-
-def fourcc_string(i):
-    s = chr(i & 255)
-    for shift in (8,16,24):
-        s += chr(i>>shift & 255)
-    return s
-
-cpdef v4l2.__u32 fourcc_u32(char * fourcc):
-    return v4l2.v4l2_fourcc(fourcc[0],fourcc[1],fourcc[2],fourcc[3])
 
 
 cdef class buffer_handle:
@@ -878,3 +865,17 @@ cdef class Cap_Info:
             raise Exception("Could not close device. Handle: '%s'. Error: %d, %s\n"%(self.dev_handle, errno, strerror(errno) ))
         self.dev_handle = -1
 
+
+def get_sys_time_monotonic():
+    cdef time.timespec t
+    time.clock_gettime(time.CLOCK_MONOTONIC, &t)
+    return t.tv_sec + <double>t.tv_nsec * 1e-9
+
+def fourcc_string(i):
+    s = chr(i & 255)
+    for shift in (8,16,24):
+        s += chr(i>>shift & 255)
+    return s
+
+cpdef v4l2.__u32 fourcc_u32(char * fourcc):
+    return v4l2.v4l2_fourcc(fourcc[0],fourcc[1],fourcc[2],fourcc[3])
