@@ -19,6 +19,11 @@ The `Frame` class has caching build in to avoid double decompression or conversi
 import v4l2
 cap = v4l2.Capture("/video/dev0")
 frame = cap.get_frame()
+
+gray_numpy_array = frame.gray 
+bgr_numpy_array = frame.bgr
+jpeg_buffer_handle = frame.jpeg_buffer
+
 cap = None
 ```
 
