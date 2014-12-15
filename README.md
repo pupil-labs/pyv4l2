@@ -5,6 +5,7 @@ Python bindings for Video4Linux2 API using [libjpegturbo](http://libjpeg-turbo.v
 
 
 * Full access to all uvc settings (Zoom,Focus,Brightness,etc.)
+* Full access to all stream and format paraters (rates,sizes,etc.)
 * Enumerate all capture devices wiht list_devices()
 * Capture instance will always grab mjpeg conpressed frames from cameras.
 
@@ -14,10 +15,11 @@ This gives the user the full flexiblity: Grab just the jpeg buffers or have them
 The `Frame` class has caching build in to avoid double decompression or conversion.
 
 
-## example code
+## Example 
 ```python
 import v4l2
 cap = v4l2.Capture("/video/dev0")
+print cap.frame_rates
 frame = cap.get_frame()
 
 gray_numpy_array = frame.gray 
