@@ -1,9 +1,9 @@
 pyv4l2
 =======
 
-Python bindings for Video4Linux2 API using libjpegturbo (utilizing the tubojpeg api).
+Python bindings for Video4Linux2 API using [libjpegturbo](http://libjpeg-turbo.virtualgl.org/) (utilizing the tubojpeg api).
 
-Full access to all uvc settings.
+Full access to all uvc settings (Zoom,Focus,Brightness,etc.)
 Enumerate all capture devices wiht list_devices()
 
 Capture instance will always grab mjpeg conpressed frames from cameras.
