@@ -5,7 +5,7 @@ Python bindings for Video4Linux2 API using [libjpegturbo](http://libjpeg-turbo.v
 
 
 * Full access to all uvc settings (Zoom,Focus,Brightness,etc.)
-* Full access to all stream and format paraters (rates,sizes,etc.)
+* Full access to all stream and format parameters (rates,sizes,etc.)
 * Enumerate all capture devices wiht list_devices()
 * Capture instance will always grab mjpeg conpressed frames from cameras.
 
