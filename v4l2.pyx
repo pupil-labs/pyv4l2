@@ -1,5 +1,4 @@
 import cython
-
 from posix cimport fcntl,unistd, stat, time
 from posix.ioctl cimport ioctl
 from libc.errno cimport errno,EINTR,EINVAL,EAGAIN,EIO,ERANGE
@@ -19,7 +18,7 @@ from os import listdir as oslistdir
 import logging
 logger = logging.getLogger(__name__)
 
-
+__version__ = '0.1' #make sure this is the same in setup.py
 
 
 cdef class buffer_handle:

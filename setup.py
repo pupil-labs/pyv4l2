@@ -24,7 +24,7 @@ extensions = [
 ]
 
 setup(  name="v4l2",
-        version="0.0.1",
+        version="0.1", #make sure this is the same in v4l2.pxy
         description="V4L2 bindings with format conversion tool.",
         ext_modules=cythonize(extensions)
 )
