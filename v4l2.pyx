@@ -377,7 +377,7 @@ cdef class Capture:
         # print self._active_buffer.timestamp.tv_sec,',',self._active_buffer.timestamp.tv_usec,self._active_buffer.bytesused,self._active_buffer.index
         cdef Frame out_frame = Frame()
         out_frame.tj_context = self.tj_context
-        out_frame.timestamp = <double>self._active_buffer.timestamp.tv_sec + <double>self._active_buffer.timestamp.tv_usec / 10e6
+        out_frame.timestamp = <double>self._active_buffer.timestamp.tv_sec + (<double>self._active_buffer.timestamp.tv_usec) / 10e5
         out_frame.width,out_frame.height = self._frame_size
         
         cdef buffer_handle buf = buffer_handle()
@@ -394,10 +394,10 @@ cdef class Capture:
                 raise Exception("JPEG header corrupted.")
 
         elif self._transport_format == v4l2.V4L2_PIX_FMT_YUYV:
-            raise Exception("Reading Transport format YUYV is not implemented")
+            raise Exception("Transport format YUYV is not implemented")
             # out_frame._yuyv_buffer = buf
         else:
-            raise Exception("Reading Tranport format data '%s' is not implemented."%self.transport_format)
+            raise Exception("Tranport format data '%s' is not implemented."%self.transport_format)
         return out_frame
 
 
