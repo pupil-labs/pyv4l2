@@ -308,6 +308,13 @@ cdef class Capture:
         #set some sane defaults:
         self.transport_format = 'MJPG'
 
+    def restart(self):
+        self.close()
+        self.dev_handle = self.open_device()
+        self.verify_device()
+        self.transport_format = 'MJPG' #this will set prev parms
+        logger.warning("restarted capture device")
+
 
     def close(self):
         try:
@@ -335,7 +342,8 @@ cdef class Capture:
             try:
                 frame = self.get_frame()
             except:
-                logger.debug('Could not get Frame on "%s". Trying %s more times.'%(self.dev_name,a))
+                logger.warning('Could not get Frame on "%s". Trying %s more times.'%(self.dev_name,a))
+                self.restart()
             else: 
                 return frame
         raise Exception("Could not grab frame from %s"%self.dev_name)
